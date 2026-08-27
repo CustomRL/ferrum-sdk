@@ -1,0 +1,50 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "workspace-read".
+// Consent: "see which files you have open and where you are working".
+
+/// Roots, open buffers, focus, cursors, viewport.
+///
+/// Separate from `buffer-read` because the consent sentences differ. This one
+/// discloses *paths* and *attention* without disclosing a byte of content.
+/// Paired with `net-fetch` it is a project-structure exfiltrator; alone it is
+/// nearly inert. The consent UI shows pairings for exactly this reason.
+///
+/// All non-blocking: served from the host-resident workspace model.
+interface workspace-read {
+  use types.{buffer-id, revision, root-id, language-id, cursor-set, viewport, host-error};
+
+  record root {
+    id: root-id,
+    /// Display name, not a filesystem path. A path reaches a guest only
+    /// through `file-read`, which is a separate grant.
+    name: string,
+    /// False in restricted mode. A plugin acting on project-derived
+    /// configuration must check this.
+    trusted: bool,
+  }
+
+  record buffer-info {
+    id: buffer-id,
+    revision: revision,
+    root: option<root-id>,
+    /// Root-relative, forward-slashed. `none` for scratch buffers.
+    path: option<string>,
+    language: option<language-id>,
+    dirty: bool,
+    read-only: bool,
+  }
+
+  roots: func() -> list<root>;
+  buffers: func() -> list<buffer-info>;
+  focused-buffer: func() -> option<buffer-id>;
+
+  /// The user's current selections across the focused view, which may span
+  /// excerpts from several buffers. `none` when no editor is focused.
+  cursors: func() -> option<cursor-set>;
+
+  /// What the focused view is showing right now. Producers that hold a
+  /// `diagnostics` or `decorations` grant get this as a stream on their own
+  /// channel and should prefer that; this is the point sample, for commands.
+  view: func() -> option<viewport>;
+}

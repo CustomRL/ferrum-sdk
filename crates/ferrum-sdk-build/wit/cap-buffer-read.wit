@@ -1,0 +1,84 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "buffer-read".
+// Consent: "read the contents of files you have open".
+
+/// Read the text of buffers open in the workspace.
+///
+/// Every function here is non-blocking and none is `async` — a promise about
+/// the host implementation, not a hope: acquiring a snapshot is an `Arc` clone
+/// of an immutable rope and reading from one touches no lock the UI thread can
+/// hold. Nothing here can sit between a keystroke and a frame because nothing
+/// here waits.
+interface buffer-read {
+  use types.{buffer-id, revision, anchor, span, language-id, host-error};
+
+  /// An immutable, structurally-shared view of one buffer at one revision.
+  ///
+  /// The resource *is* the consistency guarantee: a snapshot's revision never
+  /// moves, so a sequence of reads cannot tear and a guest need not re-check
+  /// the version between two reads. Hold it for one unit of work and drop it;
+  /// holding one across many edits pins a rope generation in host memory.
+  resource snapshot {
+    id: func() -> buffer-id;
+    revision: func() -> revision;
+    language: func() -> option<language-id>;
+    byte-len: func() -> u32;
+    line-count: func() -> u32;
+
+    /// Copy out `[start, end)`. Clamped to the buffer and snapped outward to
+    /// char boundaries; a slice never splits a scalar value. Refused with
+    /// `too-many` above `limits.max-payload-bytes`.
+    text: func(start: u32, end: u32) -> result<string, host-error>;
+
+    /// Stream `[start, end)` in host-chosen chunks, each ending on a char
+    /// boundary. Prefer this above a few KiB: the host sizes chunks to its own
+    /// copy budget, and dropping the readable end stops the work.
+    chunks: func(start: u32, end: u32) -> stream<string>;
+
+    /// Byte range of a zero-based row, excluding the line terminator.
+    line: func(row: u32) -> result<tuple<u32, u32>, host-error>;
+
+    /// `(row, byte-column)` for a byte offset.
+    locate: func(offset: u32) -> result<tuple<u32, u32>, host-error>;
+
+    /// UTF-16 code-unit offset for a byte offset, and back. Present because
+    /// every language server speaks UTF-16 and the rope carries the metric
+    /// natively — re-deriving it by scanning is slower and a reliable source
+    /// of off-by-one bugs on astral-plane text.
+    to-utf16: func(offset: u32) -> result<u32, host-error>;
+    from-utf16: func(units: u32) -> result<u32, host-error>;
+  }
+
+  /// Acquire a snapshot at a specific revision. Non-blocking. Fails with
+  /// `stale` if the host no longer retains that revision.
+  open: func(buffer: buffer-id, at: revision) -> result<snapshot, host-error>;
+
+  /// Acquire a snapshot at whatever the buffer is now. Prefer `open` with the
+  /// revision the request or excerpt named: a producer that answers against
+  /// the latest revision instead of the one it was asked about publishes a
+  /// stamp that is a lie.
+  open-latest: func(buffer: buffer-id) -> result<snapshot, host-error>;
+
+  /// Byte range of the word around `offset`, using the host's own
+  /// language-aware word definition.
+  ///
+  /// The one place `borrow` appears: the snapshot is inspected, not consumed.
+  /// Provided because a guest re-implementing word boundaries will disagree
+  /// with the editor's own selection commands.
+  word-at: func(s: borrow<snapshot>, offset: u32) -> result<tuple<u32, u32>, host-error>;
+
+  /// Translate anchors computed against `from` forward to the buffer's current
+  /// revision. `none` means the edit deleted the region the anchor was in.
+  ///
+  /// The `rebasable` staleness class made available to guests: work computed
+  /// three keystrokes ago moves forward instead of being thrown away.
+  rebase: func(buffer: buffer-id, from-revision: revision, anchors: list<anchor>)
+      -> result<tuple<revision, list<option<anchor>>>, host-error>;
+
+  /// Same, for whole spans. Cheaper than two `rebase` calls and it preserves
+  /// the invariant that a rebased span with a deleted interior collapses
+  /// rather than inverting.
+  rebase-spans: func(buffer: buffer-id, from-revision: revision, spans: list<span>)
+      -> result<tuple<revision, list<option<span>>>, host-error>;
+}

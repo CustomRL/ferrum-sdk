@@ -1,0 +1,86 @@
+package ferrum:plugin@1.0.0;
+
+// EXPORTS. Optional. Off-path notification.
+
+/// Buffer events.
+///
+/// **You are told what changed. You are never asked what to do about it.**
+/// Every function returns `result<_, plugin-error>` — an acknowledgement with
+/// no payload a frame could need. There is no return type here a renderer
+/// could block on, so the invariant that no plugin call sits between a
+/// keystroke and a frame is a property of the signatures rather than a rule
+/// the host must keep remembering.
+///
+/// Delivery is *after* the frame that showed the edit, coalesced, droppable.
+///
+/// Note what these events do **not** carry: no text, no path, no language, no
+/// cursors, no viewport. An event never smuggles data past a grant. A plugin
+/// holding only `diagnostics` learns that buffer 7 changed and can do nothing
+/// with it. Language routing needs no grant at all, because the host filters
+/// delivery by the manifest's declared triggers — which is also one fewer
+/// guest call per event.
+interface buffer-observer {
+  use types.{buffer-id, revision, plugin-error};
+
+  /// One replaced range, in offsets against the *previous* revision.
+  record change {
+    start: u32,
+    old-end: u32,
+    new-len: u32,
+  }
+
+  record delta {
+    /// Ranges in order, from `from` to `to`.
+    changes: list<change>,
+    /// Intermediate revisions the host coalesced away. Zero means you have
+    /// seen every revision in between. Non-zero is a load signal, not an
+    /// error, and it lets a guest distinguish "nothing happened" from "you
+    /// fell behind" without waiting for the coarse all-or-nothing `resync`.
+    skipped: u32,
+  }
+
+  variant edit-batch {
+    incremental(delta),
+    /// The guest fell too far behind, or the buffer was reloaded from disk or
+    /// re-decoded. Discard derived state and re-read from a snapshot.
+    resync,
+  }
+
+  opened: async func(buffer: buffer-id, at: revision) -> result<_, plugin-error>;
+
+  changed: async func(buffer: buffer-id, from-revision: revision, to-revision: revision, batch: edit-batch)
+      -> result<_, plugin-error>;
+
+  saved: async func(buffer: buffer-id, at: revision) -> result<_, plugin-error>;
+
+  closed: async func(buffer: buffer-id) -> result<_, plugin-error>;
+
+  /// The user moved. Carries no cursors: read them through `workspace-read` if
+  /// that was granted.
+  cursors-moved: async func(buffer: buffer-id, at: revision) -> result<_, plugin-error>;
+}
+
+/// Workspace events. Same rules, same thinness.
+interface workspace-observer {
+  use types.{buffer-id, root-id, plugin-error};
+
+  variant workspace-event {
+    root-added(root-id),
+    root-removed(root-id),
+    /// Trust granted or revoked. A plugin acting on project-derived
+    /// configuration must re-check `workspace-read.roots`.
+    trust-changed(root-id),
+    /// This plugin's own configuration changed. Re-read it.
+    config-changed,
+    /// Files changed on disk under these roots, coalesced. Which files is not
+    /// in the payload: re-scan with `file-read` if that was granted.
+    files-changed(list<root-id>),
+    focus-changed(option<buffer-id>),
+    /// The host dropped this many events rather than block. Resynchronise from
+    /// `workspace-read` if you care.
+    dropped(u32),
+    other(string),
+  }
+
+  notify: async func(e: workspace-event) -> result<_, plugin-error>;
+}

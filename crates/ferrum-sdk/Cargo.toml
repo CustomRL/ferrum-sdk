@@ -1,0 +1,17 @@
+[package]
+name = "ferrum-sdk"
+description = "Write plugins for the Ferrum editor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["ferrum", "editor", "plugin", "wasm"]
+categories = ["development-tools", "wasm"]
+include = ["src/**", "README.md"]
+
+[dependencies]
+wit-bindgen = "0.61"
+
+[lints]
+workspace = true

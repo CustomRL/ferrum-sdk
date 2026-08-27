@@ -1,0 +1,80 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "tooling".
+// Consent: "wire up the language tools listed in its manifest".
+
+/// Activate the language-server, formatter and grammar wiring this plugin's
+/// manifest declared.
+///
+/// **Declaring, never spawning.** Tool integrations are a separate artifact
+/// class with a separate registry section, review tier and badge, because they
+/// run a native binary as the user with no sandbox at all. Nothing here
+/// crosses that line:
+///
+///  - The tool id, its per-platform download-host allowlist, its SHA-256
+///    digest, its argv and its languages are all in the signed manifest. A
+///    guest cannot supply a path, a binary, an argv, an environment or a
+///    digest, and cannot name a tool its manifest did not declare — there is
+///    no function here that takes one. Swapping the binary requires a manifest
+///    change, which routes through re-consent, and revocation granularity is
+///    the digest, not the extension name.
+///  - The host fetches, verifies and spawns, at project open — never at first
+///    file open, which times a large download to the moment the user is
+///    staring at code expecting completions.
+///  - The guest cannot *talk* to what it activated. The host owns the LSP
+///    client. A guest proxy onto a language server would be a sandbox escape
+///    wearing a protocol.
+///
+/// What is left for the world is the genuinely computed part: options derived
+/// from the project, and which roots to activate in. Everything else would be
+/// the manifest restated, and a second source of truth for a security-relevant
+/// fact is worse than no fact at all.
+interface tooling {
+  use types.{tool-id, root-id, attributes, host-error};
+
+  enum tool-role { language-server, formatter, grammar, other }
+
+  record options {
+    /// Handed to the tool as its initialisation options. JSON, host-validated
+    /// against the schema the manifest declared, for the same reason
+    /// `config-read.own-config` is JSON.
+    initialization-options: option<string>,
+    /// Roots to activate in. Empty means every root whose markers match.
+    roots: list<root-id>,
+    extra: attributes,
+  }
+
+  /// Open taxonomy so the host can grow its lifecycle without an ABI break.
+  /// v1 states: "declared" | "fetching" | "verifying" | "starting" |
+  /// "running" | "stopped" | "failed" | "blocked-untrusted".
+  record status {
+    state: string,
+    detail: option<string>,
+    /// Bytes fetched and bytes expected, when the host knows both.
+    progress: option<tuple<u64, u64>>,
+  }
+
+  /// Every wiring this plugin's manifest declared.
+  all: func() -> list<wiring>;
+  get: func(tool: tool-id) -> option<wiring>;
+
+  resource wiring {
+    tool: func() -> tool-id;
+    role: func() -> tool-role;
+
+    /// Record intent. Non-blocking: fetching, verifying and spawning happen
+    /// later, on the host's schedule. `denied` if the workspace is untrusted —
+    /// activation-class configuration is inert until trust is granted.
+    activate: func(o: options) -> result<_, host-error>;
+    deactivate: func() -> result<_, host-error>;
+
+    /// Fetch, verify, spawn and health transitions as the host performs them.
+    /// Once per wiring.
+    ///
+    /// Without this a declaration fires into the void and a plugin can never
+    /// tell the user "downloading rust-analyzer" or surface a digest
+    /// verification failure — which is precisely the failure the user needs
+    /// explained, because it is the one that looks like the plugin is broken.
+    status: func() -> result<stream<status>, host-error>;
+  }
+}

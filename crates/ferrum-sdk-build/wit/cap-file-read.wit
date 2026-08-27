@@ -1,0 +1,72 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "file-read".
+// Consent: "read any file in your project, including ones you have not opened".
+
+/// Read files under a workspace root that are not open as buffers.
+///
+/// The widest read authority in the world, alone in its own interface so it is
+/// alone on its own consent line. It reads `.env`. It reads private keys that
+/// happen to sit in the tree. Granting it is a materially different decision
+/// from granting `buffer-read`.
+///
+/// **There is no write counterpart, on purpose.** At v1 a plugin cannot write
+/// to the filesystem at all. Every mutation goes through `edits`, lands in the
+/// undo tree as a labelled transaction, and reaches disk only when the user
+/// saves. That single omission deletes the write-a-payload-and-wait class
+/// outright and costs plugins nothing they needed at v1.
+///
+/// If a filesystem write ever ships, the version-exactness mechanism is
+/// already decided and must not be reinvented under pressure: a `file-edit`
+/// carrying a SHA-256 `base-digest` the host re-hashes immediately before
+/// applying, rejecting on mismatch — the digest playing the part `revision`
+/// plays for a buffer. `digest` below exists so a guest can pin one without
+/// reading the bytes across the ABI.
+///
+/// Never a broad WASI filesystem import. Paths are root-relative, normalised
+/// and re-checked *after* symlink resolution; `..` escaping a root is
+/// `denied`, not clamped.
+interface file-read {
+  use types.{root-id, host-error};
+
+  enum entry-kind { file, directory, symlink, other }
+
+  record entry {
+    name: string,
+    kind: entry-kind,
+    byte-len: u64,
+  }
+
+  record read-options {
+    /// Refuse above this many bytes rather than truncating. Truncation is a
+    /// correctness trap: a guest that parses a truncated file reports
+    /// confident nonsense.
+    max-bytes: u32,
+    /// Include files excluded by the workspace ignore rules. The host may
+    /// refuse this independently of the grant.
+    include-ignored: bool,
+  }
+
+  /// Async, and the deadline belongs to the host: it starts a timer when the
+  /// call begins and resolves with `deadline-exceeded` when the timer fires,
+  /// whatever the disk is doing. The guest never holds the timer, which is
+  /// what makes the bound structural — epoch interruption provably does not
+  /// preempt a guest parked inside a host call.
+  read-text: async func(root: root-id, path: string, options: read-options)
+      -> result<string, host-error>;
+
+  read-bytes: async func(root: root-id, path: string, options: read-options)
+      -> result<list<u8>, host-error>;
+
+  list-dir: async func(root: root-id, path: string) -> result<list<entry>, host-error>;
+
+  exists: async func(root: root-id, path: string) -> result<bool, host-error>;
+
+  /// SHA-256 of the file as it is on disk.
+  digest: async func(root: root-id, path: string) -> result<list<u8>, host-error>;
+
+  /// Root-relative paths matching a glob, streamed as the ignore-respecting
+  /// parallel walk produces them. Dropping the readable end stops the walk, so
+  /// abandoning a search actually cancels it.
+  find: func(root: root-id, glob: string) -> stream<string>;
+}

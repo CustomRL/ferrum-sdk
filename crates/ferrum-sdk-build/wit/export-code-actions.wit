@@ -1,0 +1,56 @@
+package ferrum:plugin@1.0.0;
+
+// EXPORT. Optional.
+
+interface code-actions {
+  use types.{excerpt, edit-proposal, attributes, call-context, plugin-error};
+
+  record request {
+    call: call-context,
+    /// The user's selection, or the caret's row when there is none.
+    ///
+    /// **A list, always.** A selection in a project-search multibuffer crosses
+    /// excerpts from six different files, and that surface is directly
+    /// editable by design. One buffer and one span cannot describe it, and a
+    /// record field cannot be widened later.
+    at: list<excerpt>,
+    /// Restrict to these kinds. Empty means all.
+    only: list<string>,
+    /// Diagnostic codes intersecting `at`, from every producer including the
+    /// host's own — already rebased to the request's revisions, because this
+    /// is what the user is looking at, not what was true when the analysis
+    /// ran. A fix provider can key on them without holding a read capability
+    /// to go and find them.
+    diagnostic-codes: list<string>,
+  }
+
+  record action {
+    /// Stable for the life of this request, for `resolve`.
+    id: string,
+    title: string,
+    /// Open taxonomy, hierarchical and dotted: "quickfix" |
+    /// "refactor.extract.function" | "source.organize-imports" |
+    /// "source.fix-all" | ... Same reasoning and same SDK mitigations as
+    /// `completion.item.kind`.
+    kind: string,
+    /// Ask the host to offer this as the default on the lightbulb.
+    preferred: bool,
+    /// Present when the edit was cheap to compute up front. Absent means the
+    /// host calls `resolve` if the user picks it — the standard trick for not
+    /// computing twenty refactorings to show twenty titles.
+    edit: option<edit-proposal>,
+    extra: attributes,
+  }
+
+  query: async func(r: request) -> result<stream<action>, plugin-error>;
+
+  /// Compute the edit for an action that did not carry one.
+  ///
+  /// The proposal is **returned**, not applied. This is the solicited half of
+  /// the line drawn in the `edits` capability: the host asked, the user
+  /// picked, the host applies, version-exactly, as one undo transaction. A
+  /// quick-fix plugin therefore needs no `edits` grant, and the grant means
+  /// what it says.
+  resolve: async func(call: call-context, id: string)
+      -> result<edit-proposal, plugin-error>;
+}

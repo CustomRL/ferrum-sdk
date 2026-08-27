@@ -1,0 +1,28 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "log". Ambient.
+
+/// Write to this plugin's own console.
+///
+/// A capability rather than a freebie because it is a channel onto the user's
+/// disk with attacker-controlled content in it — and because the console is
+/// the debugger here, so it is worth naming in the consent dialog.
+///
+/// Every function is fire-and-forget and returns nothing, so there is no way
+/// to write a logging call that blocks. Records are pushed into a bounded
+/// per-plugin ring; when it is full the oldest record is dropped, never the
+/// caller.
+interface log {
+  use types.{attributes};
+
+  enum level { trace, debug, info, warn, error }
+
+  write: func(at: level, message: string);
+
+  /// Structured form. Fields are rendered as a filterable table.
+  event: func(at: level, name: string, fields: attributes);
+
+  /// Reads a host-resident atomic. Guard expensive formatting with this
+  /// rather than formatting and discarding.
+  enabled: func(at: level) -> bool;
+}

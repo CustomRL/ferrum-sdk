@@ -1,0 +1,60 @@
+package ferrum:plugin@1.0.0;
+
+// EXPORT. Optional.
+
+interface symbols {
+  use types.{excerpt, span, place, attributes, call-context, plugin-error};
+
+  record document-request {
+    call: call-context,
+    /// The excerpts the outline covers. A file tab is one excerpt spanning the
+    /// whole file; a project-search multibuffer is many, from many buffers.
+    /// Answer `call.view.visible` first.
+    targets: list<excerpt>,
+  }
+
+  /// Flattened, in pre-order, because WIT has no recursive types. `depth` is
+  /// nesting relative to the previous item; a tree streams as a sequence and
+  /// the host reassembles it. Parent indices are worse under a stream, where
+  /// indices depend on arrival order and a bad one lets a naive host build a
+  /// cycle.
+  record symbol {
+    name: string,
+    detail: option<string>,
+    /// Open taxonomy: "function" | "method" | "struct" | "class" | "module" |
+    /// "constant" | "field" | "interface" | "enum" | ... String for the same
+    /// reason as the other kinds, and additionally because half of these
+    /// collide with WIT keywords as enum cases.
+    kind: string,
+    /// Index into `document-request.targets`. Spans below are relative to that
+    /// excerpt's buffer and revision — named once, not per symbol.
+    target: u32,
+    /// The whole construct, for folding and the breadcrumb range.
+    at: span,
+    /// Just the name, so "reveal" places the cursor sensibly.
+    name-at: span,
+    depth: u32,
+    extra: attributes,
+  }
+
+  record workspace-request {
+    call: call-context,
+    query: string,
+  }
+
+  /// Not buffer-scoped, so there is no revision to be stale against: the host
+  /// re-resolves each `place` when the user opens it.
+  record workspace-symbol {
+    name: string,
+    container: option<string>,
+    kind: string,
+    at: place,
+    extra: attributes,
+  }
+
+  document: async func(r: document-request) -> result<stream<symbol>, plugin-error>;
+
+  /// The host debounces and supersedes; a provider does not need to.
+  workspace: async func(r: workspace-request)
+      -> result<stream<workspace-symbol>, plugin-error>;
+}

@@ -1,0 +1,38 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "config-read".
+
+/// Resolved editor settings and this plugin's own configuration.
+interface config-read {
+  use types.{buffer-id, host-error};
+
+  enum indent-style { spaces, tabs }
+  enum line-ending { lf, crlf }
+
+  record editor-settings {
+    indent-style: indent-style,
+    indent-width: u32,
+    tab-width: u32,
+    line-ending: line-ending,
+    insert-final-newline: bool,
+    trim-trailing-whitespace: bool,
+    max-line-length: option<u32>,
+  }
+
+  /// Fully resolved for one buffer across every configuration layer, with
+  /// EditorConfig applied — which outranks user settings. A formatter that
+  /// ignores this and uses its own defaults reformats the file against the
+  /// project's committed config, which is the single most common way a
+  /// formatting integration becomes hated.
+  settings-for: func(buffer: buffer-id) -> result<editor-settings, host-error>;
+
+  /// This plugin's own configuration as a JSON document, already validated by
+  /// the host against the schema its manifest declared.
+  ///
+  /// A string, and that is a wart with its eyes open: WIT has no recursive
+  /// types, so an open-ended config value cannot be expressed as a variant,
+  /// and enumerating every plugin's settings in a shared world is absurd. The
+  /// mitigation is that validation happens host-side, so the guest parses a
+  /// document that already conforms.
+  own-config: func() -> string;
+}

@@ -1,0 +1,6 @@
+[toolchain]
+# The floor, not a pin. A plugin author should be able to build with whatever
+# stable they have; this only says what the SDK itself is known to work with.
+channel = "stable"
+targets = ["wasm32-wasip2"]
+components = ["rustfmt", "clippy"]

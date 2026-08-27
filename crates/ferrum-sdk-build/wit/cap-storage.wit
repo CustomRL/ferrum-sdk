@@ -1,0 +1,27 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "storage".
+
+/// A quota'd private key/value space, keyed by plugin identity and workspace.
+///
+/// Not the filesystem. The host owns the bytes, can show them, can clear them
+/// on uninstall, and can size-cap them. A plugin caching an index belongs
+/// here; a plugin that wants a directory does not exist in this world.
+interface storage {
+  use types.{host-error};
+
+  enum scope {
+    /// Shared across every workspace.
+    global,
+    /// Private to the current workspace.
+    workspace,
+  }
+
+  get: async func(at: scope, key: string) -> result<option<list<u8>>, host-error>;
+  set: async func(at: scope, key: string, value: list<u8>) -> result<_, host-error>;
+  remove: async func(at: scope, key: string) -> result<_, host-error>;
+  keys: async func(at: scope, prefix: string) -> result<list<string>, host-error>;
+
+  /// `(bytes-used, bytes-allowed)`. Non-blocking.
+  usage: func(at: scope) -> tuple<u64, u64>;
+}

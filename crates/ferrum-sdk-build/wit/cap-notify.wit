@@ -1,0 +1,58 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "notify".
+
+/// Say something to the user.
+///
+/// **This is not a UI surface and must not become one.** The plugin supplies
+/// text and a severity; the host decides whether anything appears, where, in
+/// what typeface and for how long. No geometry, no colour, no widget, no
+/// handle to anything drawn. A plugin cannot pin a modal open, cannot steal
+/// focus, and cannot draw a pixel.
+///
+/// It exists because the alternative is worse: a plugin whose tool is missing
+/// needs to say so, and without this it says so by emitting a fake diagnostic
+/// at 0:0, which is what comparable ecosystems actually do.
+///
+/// It is also the seam. When a constrained declarative panel vocabulary
+/// arrives it is a *new* capability interface and a new `cap-panels` world,
+/// granted separately, and nothing here changes.
+interface notify {
+  use types.{cancellation, host-error};
+
+  enum level { info, warn, error }
+
+  record choice {
+    id: string,
+    label: string,
+  }
+
+  /// Fire and forget. No result, so it cannot be awaited and cannot block.
+  /// The host coalesces by `key`, rate-limits per plugin, and may suppress
+  /// entirely; a plugin cannot tell whether its message was shown.
+  post: func(at: level, message: string, key: option<string>);
+
+  /// Ask the user to choose. Resolves with the chosen id, or `none` if the
+  /// host dismissed it on its own schedule — which it will, because the
+  /// lifetime belongs to the host. A guest cannot hold the user hostage.
+  ask: async func(at: level, message: string, choices: list<choice>)
+      -> result<option<string>, host-error>;
+
+  /// Long-running work the user should be able to see and cancel.
+  ///
+  /// A resource because its lifetime is the work's lifetime: dropping the
+  /// handle ends the indicator, so a trapped or unwound guest cannot leave a
+  /// spinner on screen forever.
+  resource task {
+    constructor(title: string);
+
+    /// `fraction` in `[0, 1]`, or `none` for indeterminate.
+    report: func(message: string, fraction: option<f32>);
+
+    /// Resolves if the user cancels. A `future` rather than an `async func` so
+    /// the guest can select on it against its own work — an await that only
+    /// completes on cancellation is a deadlock waiting for a user who never
+    /// clicks.
+    cancelled: func() -> future<cancellation>;
+  }
+}

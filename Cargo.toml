@@ -1,0 +1,18 @@
+[workspace]
+members = ["crates/ferrum-sdk", "crates/ferrum-sdk-build", "examples/minimal"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+# Permissive on purpose. The editor is GPL-3.0-or-later, and an SDK under the
+# same licence would make every plugin that links it GPL as well — deciding for
+# authors what they are allowed to write, which is not the SDK's decision to
+# make.
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/CustomRL/ferrum-sdk"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

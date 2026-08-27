@@ -1,0 +1,8 @@
+package ferrum:minimal@0.1.0;
+
+// The floor and nothing else. `plugin-base` is `types`, the three ambient
+// capabilities, and the one mandatory export — which is what makes this the
+// smallest thing that is still a plugin rather than a wasm file.
+world minimal {
+  include ferrum:plugin/plugin-base@1.0.0;
+}

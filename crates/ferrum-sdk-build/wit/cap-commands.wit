@@ -1,0 +1,41 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "commands".
+
+/// Adjust the commands this plugin's manifest declared.
+///
+/// **There is no registration here, and that is the point.** Command ids,
+/// titles, categories and `when` predicates live in the signed manifest — the
+/// actual security boundary, reviewed by the registry and shown at consent.
+/// Re-declaring them at runtime would give the host two sources of truth to
+/// reconcile and would manufacture a `denied` case that exists only because of
+/// the duplication. The world hands out *handles to what the manifest already
+/// says*; it never registers anything.
+///
+/// **There is also deliberately no way to invoke a host command from a guest.**
+/// An `execute(command-id)` would be an authority amplifier that reduces every
+/// other capability here to advisory: a plugin holding no file capability at
+/// all could run the editor's own "delete file" or "trust this workspace" and
+/// inherit the user's full authority through a string. If a plugin needs an
+/// effect, the effect gets its own narrow capability or it does not exist.
+interface commands {
+  use types.{command-id};
+
+  /// Every command this plugin's manifest declared, in manifest order.
+  all: func() -> list<command>;
+  get: func(id: command-id) -> option<command>;
+
+  /// Host-implemented, so it can gain methods for the life of major version 1.
+  resource command {
+    id: func() -> command-id;
+    /// Override the manifest's palette title for this session — a git plugin
+    /// showing the current branch, say. The manifest's title is the default
+    /// and the fallback.
+    set-title: func(title: string);
+    /// Grey it out in the palette and refuse its keybinding. The manifest's
+    /// `when` predicate still governs visibility and is evaluated host-side on
+    /// the input path with no guest call: the palette must never wake a plugin
+    /// to decide whether to list a row.
+    set-enabled: func(enabled: bool);
+  }
+}

@@ -1,0 +1,13 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "clock". Ambient.
+
+/// Monotonic time.
+///
+/// Monotonic only. There is no wall clock in this world at v1: a plugin has no
+/// need for one the host cannot serve by stamping results itself, and a wall
+/// clock is a fingerprinting and correlation surface for no benefit.
+interface clock {
+  /// Microseconds on the host's monotonic clock. The host may quantise this.
+  now: func() -> u64;
+}

@@ -1,0 +1,87 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "diagnostics".
+
+/// Publish diagnostics.
+///
+/// A sink, not a provider. Diagnostics are volunteered — a linter decides when
+/// it has something to say — so they arrive as a push through an import the
+/// user granted rather than as an answer to a question the host asked. Same
+/// test as everywhere else: speaking unprompted is authority.
+interface diagnostics {
+  use types.{buffer-id, span, place, severity, viewport, attributes,
+             staleness-class, publication, credit, host-error};
+
+  flags tags {
+    /// Rendered faded rather than underlined.
+    unnecessary,
+    /// Rendered struck through.
+    deprecated,
+  }
+
+  record related {
+    /// May point into another buffer or into a file that is not open.
+    at: place,
+    message: string,
+  }
+
+  /// Spans are bare. The buffer and the revision are named once, in the
+  /// `publication` header.
+  record item {
+    at: span,
+    at-severity: severity,
+    /// Stable machine-readable code, e.g. "E0308". What a fix-all keys on.
+    code: option<string>,
+    /// Documentation URL, opened by the host in the user's browser on explicit
+    /// action — never navigated to automatically.
+    code-href: option<string>,
+    /// Displayed origin, e.g. "clippy". The host prefixes the plugin name.
+    source: string,
+    message: string,
+    related: list<related>,
+    item-tags: tags,
+    extra: attributes,
+  }
+
+  /// Handles to the sinks this plugin's manifest declared. Named rather than
+  /// singular so one plugin can run a fast lint pass and a slow whole-project
+  /// pass without either clearing the other's results. Names, ordering and
+  /// staleness class come from the manifest.
+  all: func() -> list<sink>;
+  get: func(name: string) -> option<sink>;
+
+  resource sink {
+    name: func() -> string;
+    /// Declared in the manifest, enforced by the host. `rebasable` for a
+    /// normal linter.
+    staleness: func() -> staleness-class;
+
+    /// What the user can see, for the buffers this sink serves, as it changes.
+    /// Publish `region(visible)` first and the rest after. Once per sink; a
+    /// second call is `would-block`.
+    view: func() -> result<stream<viewport>, host-error>;
+
+    /// Additive publish credit, as the host drains. Once per sink.
+    credit-updates: func() -> result<stream<credit>, host-error>;
+    /// Credit outstanding right now. Non-blocking.
+    available-credit: func() -> credit;
+
+    /// Replace this sink's diagnostics within `p.scope` for `p.at`.
+    ///
+    /// Set-replacement, not incremental deltas. A delta protocol needs host
+    /// and guest to agree on a stable identity for every item across
+    /// revisions, which they will not, and a desynchronised delta stream
+    /// leaves permanent phantom errors on the user's screen with no way to
+    /// clear them.
+    ///
+    /// Non-blocking: the host copies into a latest-wins mailbox per
+    /// `(plugin, sink, buffer)` and returns. Not `async`, because there is
+    /// nothing for the guest to wait for. Over `limits.max-batch-items` is
+    /// `too-many` and nothing is applied; over the outstanding credit is
+    /// `would-block` and nothing is applied.
+    publish: func(p: publication, items: list<item>) -> result<_, host-error>;
+
+    clear: func(buffer: buffer-id) -> result<_, host-error>;
+    clear-all: func() -> result<_, host-error>;
+  }
+}

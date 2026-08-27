@@ -1,0 +1,86 @@
+package ferrum:plugin@1.0.0;
+
+// EXPORT. Optional. Solicited, deadline-bound.
+
+/// Completion candidates.
+///
+/// Cancellation is two mechanisms, and it needs both. The host drops the
+/// readable end, which tears down the guest's writable end whether the guest
+/// cooperates or not — that is what stops a plugin burning the pool while the
+/// user keeps typing. And `call.cancel` resolves, which is what lets a guest
+/// computing *between* stream writes learn it was superseded instead of
+/// spending its whole slice to discover a closed stream at the end.
+///
+/// A stream also makes partial results useful: completion is the `advisory`
+/// class, so ninety candidates that arrived before the deadline are worth more
+/// than a hundred that arrived after it.
+///
+/// Which languages and which trigger characters this provider serves are in
+/// the manifest. There is no selector here, so the host never calls this for a
+/// buffer the user did not consent to, and there is nothing to reconcile.
+interface completion {
+  use types.{position, span, text-edit, attributes, call-context, plugin-error};
+
+  enum trigger {
+    invoked,
+    character,
+    /// Re-request after an incomplete list.
+    incomplete,
+    other,
+  }
+
+  record request {
+    call: call-context,
+    /// The caret. One caret: completion is offered at the primary cursor and
+    /// the host replicates the accepted edit across the rest. Asking per
+    /// cursor would multiply the budget by the cursor count.
+    at: position,
+    /// The word range the host will replace, computed with the editor's own
+    /// word definition.
+    replacing: span,
+    /// The prefix the host already extracted, so a provider does not need
+    /// `buffer-read` merely to know what is being typed.
+    prefix: string,
+    reason: trigger,
+    trigger-character: option<string>,
+  }
+
+  record item {
+    label: string,
+    /// Open taxonomy: "function" | "method" | "struct" | "field" | "keyword" |
+    /// "snippet" | "module" | "constant" | "variable" | "type-parameter" | ...
+    /// A string, not an enum, because LSP has grown this set twice and a
+    /// frozen enum cannot. The SDK's typed constructors cannot emit an invalid
+    /// kind, `ferrum plugin build` fails on one against the SDK's vocabulary
+    /// file, and the host logs a rejection to the plugin console with the
+    /// offending value.
+    kind: string,
+    /// Sort key within this provider. The host re-ranks across providers and
+    /// against its own local candidates; a provider cannot pin itself to the
+    /// top.
+    sort-text: option<string>,
+    filter-text: option<string>,
+    detail: option<string>,
+    /// Markdown, rendered in a restricted subset: no images, no HTML, no
+    /// navigation.
+    documentation: option<string>,
+    /// Anchored, so it survives the keystrokes typed while this stream is
+    /// still arriving.
+    edit: text-edit,
+    additional-edits: list<text-edit>,
+    /// Stable across re-requests at the same position.
+    ///
+    /// Anti-flicker keys on this. When late results arrive the host re-ranks
+    /// and keeps the *same entry* selected as it moves, rather than preserving
+    /// a row index or pinning local candidates above server ones — pinning by
+    /// position means the best answer can never reach the top, which inverts
+    /// ranking quality in the name of stability.
+    identity: string,
+    extra: attributes,
+  }
+
+  /// Returns the readable end within one execution slice; items follow.
+  /// `not-applicable` is cheap and tells the host to stop asking about this
+  /// buffer without spinning up a stream to say nothing.
+  complete: async func(r: request) -> result<stream<item>, plugin-error>;
+}

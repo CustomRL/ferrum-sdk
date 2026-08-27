@@ -1,0 +1,25 @@
+package ferrum:plugin@1.0.0;
+
+// EXPORT. Optional.
+
+interface hover {
+  use types.{position, span, attributes, call-context, plugin-error};
+
+  record request {
+    call: call-context,
+    at: position,
+  }
+
+  record content {
+    /// The range described, for the host's highlight. Optional because a
+    /// provider with only a message should not have to invent one. Relative to
+    /// the request's buffer and revision.
+    at: option<span>,
+    /// Markdown, restricted subset.
+    markdown: string,
+    extra: attributes,
+  }
+
+  /// Several providers may answer one hover; the host composes them.
+  query: async func(r: request) -> result<option<content>, plugin-error>;
+}

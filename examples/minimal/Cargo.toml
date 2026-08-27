@@ -1,0 +1,19 @@
+[package]
+name = "minimal"
+description = "The smallest plugin that is a plugin."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ferrum-sdk = { path = "../../crates/ferrum-sdk" }
+
+[build-dependencies]
+ferrum-sdk-build = { path = "../../crates/ferrum-sdk-build" }
+
+[lints]
+workspace = true

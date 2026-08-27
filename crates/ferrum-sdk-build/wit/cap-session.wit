@@ -1,0 +1,59 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "session". Ambient — every plugin has it.
+
+/// The plugin's own identity, budget and health.
+///
+/// Deliberately **not** a root capability object. It would be convenient for a
+/// session to hand out `files()` and `diagnostics()`, and it would destroy the
+/// model: an ungranted capability must be a missing *import*, so authority is
+/// obtained from the interface that defines it and nowhere else.
+interface session {
+  use types.{limits, host-error};
+
+  /// The host's view of this plugin's budget accounting.
+  ///
+  /// Under a three-strikes rule, without this the first thing a plugin learns
+  /// about its overruns is that it is dead. With it, a producer can shed work
+  /// — publish the viewport only, skip the whole-file pass — before the host
+  /// makes that decision for it.
+  record health-signal {
+    degraded: bool,
+    /// Resets on any call that lands inside budget.
+    consecutive-overruns: u32,
+    /// Guest tasks the host currently has in flight in this instance.
+    in-flight: u32,
+    /// Calls the host declined to start since the last signal, rather than
+    /// exceed `limits.max-concurrent-calls`.
+    shed: u32,
+    /// Host-authored, shown beside the status-bar marker.
+    reason: string,
+  }
+
+  /// Namespaced plugin identity, `@owner/name`.
+  plugin-id: func() -> string;
+  /// Editor version (CalVer). Informational.
+  editor-version: func() -> string;
+  /// World version (semver). A plugin built against a newer world is refused
+  /// at load and never reaches this call.
+  world-version: func() -> string;
+
+  /// Per-call latency budget in microseconds, for calls that do not carry a
+  /// `call-context`. Read it rather than hardcoding 8000.
+  call-budget-us: func() -> u32;
+
+  /// Microseconds of guest execution left in the current slice before the
+  /// epoch deadline unwinds this instance.
+  ///
+  /// Advisory and cooperative. It is *not* what enforces the budget — the
+  /// epoch deadline does that whether the guest looks or not. It exists so a
+  /// well-behaved guest can stop and flush partial results instead of being
+  /// cut off with none.
+  slice-remaining-us: func() -> u32;
+
+  /// Host policy: caps, concurrency bound, overrun allowance.
+  current-limits: func() -> limits;
+
+  /// Health as it changes. Once per instance; a second call is `would-block`.
+  health: func() -> result<stream<health-signal>, host-error>;
+}

@@ -1,0 +1,14 @@
+[package]
+name = "ferrum-sdk-build"
+description = "Build-script support for Ferrum plugins: puts the ferrum:plugin world where bindgen can read it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+categories = ["development-tools::build-utils", "wasm"]
+build = "build.rs"
+include = ["src/**", "wit/**", "build.rs"]
+
+[lints]
+workspace = true

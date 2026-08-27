@@ -1,0 +1,475 @@
+package ferrum:plugin@1.0.0;
+
+/// Shared vocabulary. No `func`, no `resource`, no authority.
+///
+/// This interface WILL appear in every component's import list — `wasm-tools`
+/// adds transitively-used interfaces whether or not a world names them. The
+/// capability rule is therefore not "imports are capabilities" but:
+///
+///   **the import list, minus a short published allowlist, is the capability
+///   set.** The allowlist is `ferrum:plugin/types` plus the `wasi:*` shims
+///   Rust std forces, and it is *function-free by definition*: the registry
+///   fails the publish the moment an allowlisted interface acquires a `func`
+///   or a `resource`, because that is the exact moment authority could
+///   smuggle itself through the exemption.
+///
+/// Two consequences enforced by review:
+///
+///  1. A resource lives in the capability interface that hands it out, never
+///     here. Its `[resource-drop]` is a real import the `Linker` must satisfy.
+///
+///  2. A type used by both a capability import and a provider export lives
+///     here. `edit-proposal` is the case: if the `code-actions` export named
+///     `edits.edit-proposal`, an export would drag a capability into the
+///     component's type graph as a side effect of naming a record.
+///
+/// ## What is frozen
+///
+/// Every record field, every enum case, every variant case and every flags bit
+/// below is frozen for the life of major version 1. The Canonical ABI is
+/// structural: adding a field is a break, not an addition. Everything expected
+/// to churn is therefore a `string` kind plus an `attributes` bag, and the
+/// vocabulary lives in the SDK and in host-side validation, both of which
+/// version freely.
+interface types {
+  // --------------------------------------------------------------------------
+  // Identity
+  // --------------------------------------------------------------------------
+
+  /// Opaque, host-assigned, not reused within a session.
+  ///
+  /// There is no single-buffer editor view in Ferrum. Every view renders a
+  /// multibuffer and every position is `(buffer-id, anchor)`; an ordinary file
+  /// tab is a multibuffer holding one excerpt. A guest that assumes "the
+  /// current file" is writing a bug — see `excerpt` and `viewport`.
+  record buffer-id { value: u64 }
+
+  /// Per-buffer edit counter. Increments once per applied transaction, never
+  /// decrements, not comparable across buffers.
+  record revision { value: u64 }
+
+  record root-id { value: u32 }
+
+  /// Host-resolved language identity, e.g. "rust", "typescript".
+  type language-id = string;
+
+  /// A command declared in the plugin's manifest. The host namespaces it with
+  /// the plugin identity, so two plugins cannot collide.
+  type command-id = string;
+
+  /// A tool integration pinned in the plugin's manifest by download-host
+  /// allowlist and content digest. A guest can name one; it can never name a
+  /// path, a binary, an argv or a digest.
+  type tool-id = string;
+
+  // --------------------------------------------------------------------------
+  // Positions
+  //
+  // `anchor` and `span` are bare: no buffer, no revision. Both are named ONCE
+  // by the enclosing scope — the `excerpt`, the `position`, or the
+  // `publication` header. Ten thousand diagnostics in one publish carry one
+  // buffer and one revision between them, not twenty thousand copies, and
+  // there is exactly one source of truth for what they were computed against.
+  // --------------------------------------------------------------------------
+
+  /// Which side of an insertion at exactly this offset the position sticks to.
+  enum bias { left, right }
+
+  /// A byte offset plus the side it sticks to.
+  ///
+  /// Offsets index a rope that stores LF only — CRLF is stripped on load and
+  /// re-inserted on save — so a guest never observes a CR and column
+  /// arithmetic is identical on every platform.
+  ///
+  /// u32, not u64: editable buffers are bounded far below 4 GiB (the read-only
+  /// huge-file viewer is not addressable as a `buffer-id` at all) and this is
+  /// the highest-volume record in the world.
+  record anchor {
+    offset: u32,
+    bias: bias,
+  }
+
+  /// Half-open `[start, end)` within whatever buffer and revision the
+  /// enclosing scope named.
+  record span {
+    start: anchor,
+    end: anchor,
+  }
+
+  /// One buffer at one revision. The header on every publication.
+  record buffer-version {
+    buffer: buffer-id,
+    revision: revision,
+  }
+
+  /// A single point. Carries its own buffer and revision because it appears
+  /// once per request, not once per item.
+  record position {
+    buffer: buffer-id,
+    revision: revision,
+    at: anchor,
+  }
+
+  /// One contiguous region of one buffer at one revision.
+  ///
+  /// **This is the unit of everything multibuffer.** A view is a list of
+  /// excerpts; a selection across a project-search result is a list of
+  /// excerpts from six different files. Request types take `list<excerpt>`
+  /// as the default shape, not as the exception.
+  record excerpt {
+    buffer: buffer-id,
+    revision: revision,
+    at: span,
+  }
+
+  /// A region of a file that is not open as a buffer. Byte offsets are
+  /// re-resolved and clamped by the host at use time.
+  record file-span {
+    root: root-id,
+    /// Root-relative, forward-slashed, no `..` segments.
+    path: string,
+    start-byte: u64,
+    end-byte: u64,
+    /// Zero-based row, so the host can render a reference before it has read
+    /// the file.
+    line-hint: u32,
+  }
+
+  /// Somewhere in the workspace. Both cases exist from v1 because adding a
+  /// variant case later is an ABI break.
+  variant place {
+    in-buffer(excerpt),
+    in-file(file-span),
+  }
+
+  /// One cursor. `tail` is fixed, `head` is where the caret is drawn;
+  /// `tail == head` is a bare caret. Object-verb: motions produce selections,
+  /// verbs consume them.
+  ///
+  /// Carries its own buffer and revision because a multibuffer selection can
+  /// span excerpts from different files. Cursor counts are small; the wire
+  /// cost is not the concern here, correctness is.
+  record cursor {
+    buffer: buffer-id,
+    revision: revision,
+    tail: anchor,
+    head: anchor,
+  }
+
+  /// The calling convention, not a feature. A guest that reads `all[primary]`
+  /// and ignores the rest is broken in the common case.
+  record cursor-set {
+    /// Never empty. Sorted by (buffer, tail.offset). Non-overlapping.
+    all: list<cursor>,
+    /// Index into `all`. The cursor the view follows.
+    primary: u32,
+  }
+
+  /// What the user can actually see.
+  ///
+  /// The cheapest latency win in this whole pipeline is "compute the visible
+  /// rows first, publish them, then do the rest", and it is inexpressible
+  /// unless the host says what is visible — the host knows, the guest does
+  /// not. Rendering a viewport is `O(visible_rows * log n + visible_bytes)`
+  /// and no layer may be `O(file)`; a producer that ignores this is the layer
+  /// that breaks the rule.
+  ///
+  /// Multibuffer: `visible` is a list because one screen shows excerpts from
+  /// many buffers.
+  record viewport {
+    /// Bumped on every scroll, resize, fold or excerpt change. A result
+    /// computed for generation N is not wrong at N+1, merely aimed elsewhere.
+    generation: u64,
+    /// Excerpts intersecting the visible rows, in view order. Do these first.
+    visible: list<excerpt>,
+    /// `visible` widened by the host's overscan band — what the user reaches
+    /// by scrolling without a new frame. Superset of `visible`. Do these
+    /// second. Everything else is third, if at all.
+    overscan: list<excerpt>,
+  }
+
+  // --------------------------------------------------------------------------
+  // Calls: budget, staleness, cancellation
+  // --------------------------------------------------------------------------
+
+  /// How the host will treat an answer that arrives after the buffer moved.
+  /// Declared per producer channel and enforced by the host, so treatment is
+  /// not inferred from which interface published.
+  enum staleness-class {
+    /// Discard on any revision change. Anything that mutates text.
+    version-exact,
+    /// Translate forward through intervening edits via anchors and keep
+    /// rendering. Diagnostics, decorations, inlays. Actions on rebased-stale
+    /// diagnostics stay enabled — a fast typist moves the revision constantly.
+    rebasable,
+    /// Merge or drop freely. Completion candidates, symbol lists.
+    advisory,
+    /// Reserved. A v1 host never emits it; a v1 guest treats it as `advisory`.
+    other,
+  }
+
+  /// The host does not ask the guest to stop. It states why it already has.
+  enum cancel-reason {
+    /// A newer request of the same kind arrived.
+    superseded,
+    /// The deadline passed. The answer is already discarded.
+    budget-exhausted,
+    /// The viewport moved and this work is no longer aimed at anything.
+    view-changed,
+    buffer-closed,
+    user-cancelled,
+    /// The host shed this call rather than exceed `limits.max-concurrent-calls`
+    /// for this instance. Not a fault, and not a strike.
+    overloaded,
+    host-shutdown,
+    other,
+  }
+
+  /// Why a stream died, in a form the plugin console can show.
+  ///
+  /// Without the `detail`, an author staring at a closed stream cannot tell
+  /// "you were too slow" from "you were outraced" — and since interactive
+  /// breakpoint debugging of WASM does not exist on Windows, the console is
+  /// the debugger.
+  record cancellation {
+    reason: cancel-reason,
+    /// Host-authored, carrying the same text the console shows.
+    ///
+    /// A string rather than an `error-context`, which is what this was and
+    /// which no host can implement: `error-context` is the Canonical ABI's
+    /// type for the error that closes a stream or future, it implements
+    /// neither `Clone` nor `Debug`, and wasmtime's bindgen derives both on
+    /// every record — so a record containing one does not compile on the host
+    /// side at all. A contract no host can implement is not frozen, it is
+    /// broken.
+    ///
+    /// Nothing is lost. The comment this replaces said the field carries "the
+    /// same text the console shows", and that is a string. Guests still close
+    /// their own result streams with an `error-context`, which is where the
+    /// type belongs and where it works.
+    detail: option<string>,
+  }
+
+  /// The envelope on every host-initiated call. One record so that adding a
+  /// per-call fact later is a change to one type rather than to seven.
+  record call-context {
+    /// Correlates this call with its row in the host-call trace.
+    id: u64,
+    /// Microseconds the host will wait before abandoning this call. **Read
+    /// it.** 8000 at v1, but that is host policy, not an ABI constant, and it
+    /// is lower on a loaded machine.
+    budget-us: u32,
+    /// How an answer arriving after the buffer moves will be treated.
+    staleness: staleness-class,
+    /// What the user can see right now. Empty lists mean no editor is focused.
+    view: viewport,
+    /// Resolves when the host has stopped caring. Select on it against your
+    /// own work; do not park on it. Cancellation is *also* stream-drop — a
+    /// guest that ignores this still gets torn down — but a guest computing
+    /// between stream writes would otherwise burn its whole slice before
+    /// discovering the readable end was gone.
+    cancel: future<cancellation>,
+  }
+
+  // --------------------------------------------------------------------------
+  // The extension escape hatch
+  //
+  // A frozen union of primitives used as a keyed bag on the fastest-churning
+  // payloads. The type never changes; the key vocabulary grows in the SDK.
+  // Keys beginning "ferrum." are host-reserved: an unknown reserved key is
+  // rejected with `invalid`, an unknown unreserved key is ignored.
+  // --------------------------------------------------------------------------
+
+  variant attr-value {
+    text(string),
+    integer(s64),
+    number(f64),
+    boolean(bool),
+    bytes(list<u8>),
+  }
+
+  record attribute {
+    key: string,
+    value: attr-value,
+  }
+
+  type attributes = list<attribute>;
+
+  // --------------------------------------------------------------------------
+  // Edits
+  // --------------------------------------------------------------------------
+
+  record text-edit {
+    start: anchor,
+    end: anchor,
+    new-text: string,
+  }
+
+  record buffer-change {
+    buffer: buffer-id,
+    /// Version-exact. Anything that mutates text is rejected outright if the
+    /// buffer moved, never rebased: rebasing a refactor onto text the user has
+    /// since changed produces a file that was never reviewed.
+    base: revision,
+    /// Applied as one atomic batch. Ranges must not overlap.
+    changes: list<text-edit>,
+  }
+
+  /// A proposed change to the workspace.
+  ///
+  /// Lives here rather than in `edits` because both the `edits` capability
+  /// (unsolicited — needs a grant) and the `code-actions` export (solicited —
+  /// needs none) traffic in it.
+  record edit-proposal {
+    /// Shown in the undo tree and the multi-file preview. User-facing.
+    label: string,
+    /// Open taxonomy. v1 vocabulary: "format" | "fix" | "refactor" |
+    /// "generate" | "other".
+    kind: string,
+    /// One or many buffers. A multi-buffer proposal lands as a single undo
+    /// transaction sharing one group id, so undo can never reconstruct a
+    /// half-applied project state that never existed.
+    buffers: list<buffer-change>,
+    /// Where to leave the cursors. Multibuffer-aware.
+    cursors-after: option<cursor-set>,
+    /// Ask for a diff preview. The host may force it on regardless — for a
+    /// multi-buffer proposal it always does.
+    preview: bool,
+    extra: attributes,
+  }
+
+  record applied-change {
+    buffer: buffer-id,
+    /// The revision the buffer reached. Anchors against `base` are invalid
+    /// after this: rebase or recompute.
+    revision: revision,
+  }
+
+  record applied {
+    changes: list<applied-change>,
+    /// Undo transaction group. Stable for the session.
+    transaction: u64,
+  }
+
+  // --------------------------------------------------------------------------
+  // Publication, flow control, limits
+  //
+  // The one shape that realistically blows an 8 ms budget is an unbounded
+  // `list<T>` on an ingest path — a producer republishing fifty thousand
+  // diagnostics per keystroke is one ABI crossing plus a rebase pass landing
+  // on the same shared CPU pool that shaping and search use. Three mechanisms,
+  // all in the types: a hard per-call cap (`limits`), a chunk contract
+  // (`publication`), and host-issued credits (`credit`).
+  // --------------------------------------------------------------------------
+
+  enum severity { error, warning, info, hint }
+
+  /// Which part of the buffer a publication is authoritative for.
+  variant publish-scope {
+    /// Replaces everything this channel holds for the buffer.
+    whole-buffer,
+    /// Replaces only what falls inside the region and leaves the rest alone.
+    /// This is what makes viewport-first publishing cheap: publish
+    /// `region(visible)` now, `whole-buffer` when the slow pass finishes.
+    region(span),
+  }
+
+  record publication {
+    at: buffer-version,
+    scope: publish-scope,
+    /// More chunks follow for this same `at` and `scope`. The host renders
+    /// what it has rather than waiting for the set to close.
+    more: bool,
+  }
+
+  /// An additive grant. The host issues credit at channel creation and again
+  /// as it drains; a publish beyond the outstanding credit is refused with
+  /// `would-block` and nothing is applied. Never blocks the guest, never
+  /// blocks the frame.
+  record credit {
+    /// Additional publish calls permitted.
+    batches: u32,
+    /// Additional items permitted, summed across those calls.
+    items: u32,
+  }
+
+  /// Host policy, readable rather than guessed. Every one of these is a number
+  /// the host may lower under load.
+  record limits {
+    /// Maximum items in one publish call or one element of a result stream.
+    max-batch-items: u32,
+    /// Maximum encoded bytes in one call's arguments.
+    max-call-bytes: u32,
+    /// Maximum items the host retains per channel per buffer.
+    max-live-items: u32,
+    /// Maximum guest tasks the host will have in flight in this instance at
+    /// once. The host **sheds** rather than exceeding it, cancelling with
+    /// `overloaded`, because one epoch deadline unwinds every task in an
+    /// instance together and an unbounded fan-out makes that unwind
+    /// unbounded too.
+    max-concurrent-calls: u32,
+    /// Consecutive per-call budget overruns before the instance is disabled
+    /// for the session.
+    overrun-allowance: u32,
+    /// Maximum bytes in any one string or byte list.
+    max-payload-bytes: u32,
+  }
+
+  // --------------------------------------------------------------------------
+  // Errors
+  // --------------------------------------------------------------------------
+
+  /// What the *host* tells the guest went wrong. Host to guest, so it carries
+  /// `other`: a host that learns a new failure mode degrades old plugins to a
+  /// string instead of failing to decode.
+  variant host-error {
+    /// The host abandoned the call at its own deadline and resumed the guest
+    /// with this. The guest did nothing wrong; do not retry in a loop.
+    deadline-exceeded,
+    /// The supplied revision is behind the buffer's current one, carried in
+    /// the payload. Version-exact operations get this; rebasable ones do not.
+    stale(revision),
+    not-found,
+    /// Well-formed but outside this plugin's grant — a path escaping its root,
+    /// an address off its network allowlist. Not representable for a *missing*
+    /// capability: that is an unlinked import and the component never
+    /// instantiated.
+    denied(string),
+    /// Malformed argument, unknown `kind`, or a reserved `ferrum.` key the
+    /// host does not accept. A guest bug; the offending value is echoed to the
+    /// plugin console.
+    invalid(string),
+    /// The queue is full, or the channel has no outstanding credit. Drop the
+    /// work; do not spin.
+    would-block,
+    /// Batch exceeded `limits.max-batch-items`; payload is the cap. Nothing
+    /// was applied.
+    too-many(u32),
+    quota-exceeded(string),
+    internal(string),
+    other(string),
+  }
+
+  /// What the *guest* tells the host went wrong. Guest to host, so no escape
+  /// case is needed — a host that meets an unknown case would be reading a
+  /// plugin built against a newer world, which it refuses to load.
+  ///
+  /// Honest degradation is separated from failure on purpose: only `failed`
+  /// counts toward the three-strike disable. A plugin whose tool is missing is
+  /// behaving correctly, and penalising it is the exact pressure that makes
+  /// plugins emit fake diagnostics at 0:0 instead.
+  variant plugin-error {
+    /// Not applicable to this buffer or this request. The host may stop asking
+    /// for this buffer until language or configuration changes.
+    not-applicable,
+    /// A dependency is absent — an unresolved tool, a missing setting.
+    /// Surfaced in the plugin console and, with `notify`, to the user. Never
+    /// as a diagnostic, and never a strike.
+    unavailable(string),
+    /// The guest abandoned the work itself, inside its own budget. Not a
+    /// fault.
+    cancelled,
+    /// A real failure. Counts toward degradation.
+    failed(string),
+  }
+}

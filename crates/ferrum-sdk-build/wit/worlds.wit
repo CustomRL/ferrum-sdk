@@ -1,0 +1,175 @@
+package ferrum:plugin@1.0.0;
+
+// ----------------------------------------------------------------------------
+// One world per capability.
+//
+// Each of these is a single grantable capability, and the per-plugin `Linker`
+// is assembled by walking the granted set and adding exactly the matching
+// interface. Grant name, world name and interface name are the same string, so
+// there is no mapping table between manifest and runtime for anyone to get
+// wrong.
+//
+// `types` is not in this list, and it will still appear in every component's
+// import section, because wasm-tools adds transitively-used interfaces. That
+// is why the derivation rule is "imports minus a published, function-free
+// allowlist", and why the registry fails loudly the moment an allowlisted
+// interface acquires a function.
+// ----------------------------------------------------------------------------
+
+world cap-session        { import session;        }
+world cap-log            { import log;            }
+world cap-clock          { import clock;          }
+world cap-buffer-read    { import buffer-read;    }
+world cap-workspace-read { import workspace-read; }
+world cap-file-read      { import file-read;      }
+world cap-config-read    { import config-read;    }
+world cap-storage        { import storage;        }
+world cap-net-fetch      { import net-fetch;      }
+world cap-notify         { import notify;         }
+world cap-commands       { import commands;       }
+world cap-edits          { import edits;          }
+world cap-diagnostics    { import diagnostics;    }
+world cap-decorations    { import decorations;    }
+world cap-tooling        { import tooling;        }
+world cap-status-item    { import status-item;    }
+
+// Reserved, deliberately absent at v1. Adding a capability interface plus its
+// `cap-*` world later is additive: existing components do not import it, so
+// they are unaffected, and consent gains one line.
+//
+//   cap-panels     — the constrained declarative panel vocabulary. `status-item`
+//                    is not a first instalment of it: it is a fixed vocabulary
+//                    for a glanceable reading, and it stays fixed.
+//   cap-clipboard  — read is an exfiltration vector, write is not; two grants
+//   cap-net-listen — long-lived bidirectional channels
+//   cap-file-write — not planned; see the reserved `base-digest` note in
+//                    file-read
+
+// ----------------------------------------------------------------------------
+// Consent groupings. These mirror the sentences the install dialog shows, so
+// the pairing that actually matters — read plus egress — is visible as a
+// composition rather than buried in a flat list.
+// ----------------------------------------------------------------------------
+
+/// Grants nothing a user would decline. Every plugin has these.
+world cap-group-ambient {
+  include cap-session;
+  include cap-log;
+  include cap-clock;
+}
+
+/// "Read your code."
+world cap-group-read-code {
+  include cap-buffer-read;
+  include cap-config-read;
+}
+
+/// "See your project layout and where you are working."
+world cap-group-read-project {
+  include cap-workspace-read;
+  include cap-file-read;
+}
+
+/// "Annotate your code." Display-only: nothing here changes text.
+world cap-group-annotate {
+  include cap-diagnostics;
+  include cap-decorations;
+}
+
+/// "Send data off this machine." Alone, always, on its own line.
+world cap-group-egress {
+  include cap-net-fetch;
+}
+
+// ----------------------------------------------------------------------------
+// The floor. Every plugin includes this and adds the capabilities it needs and
+// the provider exports it implements.
+//
+// `types` is imported explicitly rather than left to transitive resolution, so
+// that the one interface on the allowlist is visible in the source of every
+// world rather than appearing only in the artifact.
+// ----------------------------------------------------------------------------
+
+world plugin-base {
+  import types;
+  include cap-group-ambient;
+
+  export lifecycle;
+}
+
+// ----------------------------------------------------------------------------
+// One world per optional provider export.
+//
+// These exist so both sides have a bindgen target for a single extension
+// point: an author writes `include provides-completion;` and the host
+// generates typed lowerings per export and resolves each one against the
+// instance after instantiation. A component that implements none of them is
+// a perfectly valid plugin — commands and observers alone are a real plugin.
+//
+// Adding a ninth provider interface later adds one interface and one world
+// here and changes nothing about any published component. That is the whole
+// reason there is no mandatory export set and no `provides` flag word.
+// ----------------------------------------------------------------------------
+
+world provides-buffer-events    { export buffer-observer;    }
+world provides-workspace-events { export workspace-observer; }
+world provides-commands         { export command-handler;    }
+world provides-completion       { export completion;         }
+world provides-hover            { export hover;              }
+world provides-code-actions     { export code-actions;       }
+world provides-symbols          { export symbols;            }
+
+// ----------------------------------------------------------------------------
+// The host's world.
+//
+// **No plugin targets this.** It is the union of every capability plus the one
+// mandatory export, and it exists so the host can `bindgen!` its complete
+// import surface once. A component that imported all of it would ask for every
+// capability, and the consent dialog would say exactly that.
+//
+// Optional exports are absent here on purpose: a world that declared them
+// would make a plugin that implements none of them fail to instantiate.
+// ----------------------------------------------------------------------------
+
+world ferrum-host {
+  include plugin-base;
+
+  include cap-group-read-code;
+  include cap-group-read-project;
+  include cap-group-annotate;
+  include cap-group-egress;
+
+  include cap-storage;
+  include cap-notify;
+  include cap-commands;
+  include cap-edits;
+  include cap-tooling;
+  include cap-status-item;
+}
+
+// ----------------------------------------------------------------------------
+// How a plugin actually targets this API: its own world, in its own package,
+// including only what it needs — so reaching for an ungranted capability is a
+// compile error in the author's crate rather than an instantiation error at
+// install.
+//
+//   package acme:rust-lint@1.0.0;
+//
+//   world rust-lint {
+//     include ferrum:plugin/plugin-base@1.0.0;
+//     include ferrum:plugin/cap-buffer-read@1.0.0;
+//     include ferrum:plugin/cap-diagnostics@1.0.0;
+//
+//     include ferrum:plugin/provides-buffer-events@1.0.0;
+//     include ferrum:plugin/provides-code-actions@1.0.0;
+//   }
+//
+// Consent for that plugin reads: "read the contents of files you have open"
+// and "annotate your code". It cannot reach the network, cannot see a file it
+// was not handed, and cannot change a byte of text except by returning a code
+// action the user picked.
+//
+// The registry still derives the capability set from the artifact's real
+// import list, minus the allowlist, and verifies the manifest is a superset.
+// The narrow world is a convenience for the author; it is not the check.
+// ----------------------------------------------------------------------------

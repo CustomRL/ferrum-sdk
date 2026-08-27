@@ -1,0 +1,65 @@
+package ferrum:plugin@1.0.0;
+
+// EXPORT. The only mandatory one.
+
+/// Activation.
+///
+/// Exports are obligations, not authority: an export can compute and return
+/// but can never cause, which is why the manifest's grant list is derived from
+/// imports alone and why the host is free to call, not call, or stop calling
+/// any export without a security consequence.
+///
+/// **This is the only export a plugin must implement.** Every other export
+/// interface in this package is optional and resolved by the host at
+/// instantiation: a component that does not export `completion` simply does
+/// not have that export, which is not an error — only a missing *import* is.
+/// That is what keeps adding a ninth provider interface additive instead of a
+/// flag day for every published plugin, and it is why there is no `provides`
+/// flag set: the export list is the declaration, it is static, it is in the
+/// artifact, and nobody can lie about it.
+interface lifecycle {
+  use types.{root-id, plugin-error};
+
+  enum activation-reason {
+    /// A buffer whose language the manifest named was opened.
+    language,
+    /// A command this plugin declared was invoked.
+    command,
+    /// A file whose pattern the manifest named was opened.
+    filetype,
+    /// The user asked directly.
+    explicit,
+    /// A root became trusted and the manifest's activation section applies.
+    trusted,
+    /// Restarted after the previous instance was disabled for repeated budget
+    /// overruns. State was lost. A plugin that sees this twice should do less
+    /// per call.
+    restarted,
+    /// Reloaded from disk by the dev loop. State was discarded, and that is
+    /// documented rather than worked around.
+    hot-reload,
+    other,
+  }
+
+  /// Nothing here reports which capabilities were granted, and nothing can
+  /// ask. There is nothing to ask: an ungranted capability is an import the
+  /// `Linker` never defined, so the component failed to instantiate and this
+  /// function was never reached. If the guest is running, everything it
+  /// imports was granted. Enforcement is instantiation, not inspection.
+  record context {
+    reason: activation-reason,
+    roots: list<root-id>,
+  }
+
+  /// Called once, lazily, on the first matching trigger from the manifest.
+  /// Nothing activates eagerly; there is no equivalent of `onStartupFinished`
+  /// and there will not be one.
+  ///
+  /// Must reach its first await inside one execution slice. Obtaining handles
+  /// and starting stream loops belongs here; indexing the workspace does not.
+  activate: async func(ctx: context) -> result<_, plugin-error>;
+
+  /// Best effort. The host does not wait for this and tears the instance down
+  /// regardless. Anything that must survive belongs in `storage` first.
+  deactivate: async func();
+}

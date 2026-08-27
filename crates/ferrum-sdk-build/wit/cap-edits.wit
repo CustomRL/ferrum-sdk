@@ -1,0 +1,32 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "edits".
+// Consent: "change the text of your files without being asked".
+
+/// Propose a change to the text of the workspace, unprompted.
+///
+/// The distinction that decides what needs a grant in this world:
+///
+///   *Unsolicited* effects need a capability. A plugin that decides on its own
+///   to organise imports on save is exercising authority; that is this
+///   interface.
+///
+///   *Solicited* responses do not. A code action's edit is returned as a value
+///   from an export the host called, about a request the host constructed, and
+///   is applied by the host after the user picked it. A quick-fix plugin needs
+///   no `edits` grant at all — see `code-actions.resolve`.
+///
+/// Getting that line right is what stops the grant set inflating until every
+/// plugin holds every capability and consent means nothing.
+interface edits {
+  use types.{edit-proposal, applied, host-error};
+
+  /// Off-path by construction. The host queues the proposal, returns to the
+  /// frame loop immediately, applies it on the UI thread at a frame boundary,
+  /// and only then resolves. Nothing here can sit between a keystroke and a
+  /// frame because the host is never waiting on it when a keystroke arrives.
+  ///
+  /// Version-exact: if any buffer moved past its `base` the whole proposal is
+  /// rejected with `stale`, never partially applied and never rebased.
+  apply: async func(proposal: edit-proposal) -> result<applied, host-error>;
+}

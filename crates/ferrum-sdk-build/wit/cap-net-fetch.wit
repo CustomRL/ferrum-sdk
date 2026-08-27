@@ -1,0 +1,49 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "net-fetch".
+// Consent: "send data to <hosts from the manifest>".
+
+/// Outbound HTTPS to hosts named in the plugin manifest.
+///
+/// The only interface in this world that can move a byte off the machine.
+/// That is why it is one interface, why it is never bundled into a convenience
+/// group, and why consent shows it *paired*: "can read your open files **and**
+/// send data to api.example.com" is the actual risk. Either half alone is not.
+///
+/// Never a WASI sockets import. No listening, no raw sockets, no websockets at
+/// v1 — a long-lived bidirectional channel is a different consent sentence and
+/// gets its own capability when it is actually needed.
+interface net-fetch {
+  use types.{host-error};
+
+  enum method { get, head, post, put, patch, delete }
+
+  record request {
+    method: method,
+    /// Absolute `https://` URL. The host re-checks the resolved address
+    /// against the manifest allowlist *after* DNS, so a hostile DNS answer
+    /// cannot redirect an allowed name at an internal address, and does not
+    /// follow a redirect off the allowlist.
+    url: string,
+    headers: list<tuple<string, string>>,
+    /// Buffered, not streamed, and capped by the host.
+    ///
+    /// The asymmetry is deliberate. The request body is the exfiltration
+    /// channel; buffering it is what lets the host cap it, hash it, log it and
+    /// show the user exactly what left. Response bodies carry no such risk, so
+    /// they stream.
+    body: option<list<u8>>,
+  }
+
+  record response {
+    status: u16,
+    headers: list<tuple<string, string>>,
+    /// Dropping this cancels the transfer.
+    body: stream<u8>,
+  }
+
+  /// Host-owned deadline, host-owned redirect policy, host-owned TLS trust.
+  /// The guest supplies intent and receives a result; it never holds a
+  /// connection, a socket or a timer.
+  fetch: async func(req: request) -> result<response, host-error>;
+}

@@ -1,0 +1,29 @@
+package ferrum:plugin@1.0.0;
+
+// EXPORT. Optional.
+
+interface command-handler {
+  use types.{command-id, buffer-id, cursor-set, attributes, call-context, plugin-error};
+
+  record invocation {
+    call: call-context,
+    id: command-id,
+    /// The focused buffer. `none` when invoked with no editor focused.
+    focus: option<buffer-id>,
+    /// Present when the manifest's declaration for this command asked for it.
+    /// Requesting cursors does not grant `workspace-read`; the host supplies
+    /// them because the user just aimed this command with them.
+    ///
+    /// Multi-cursor is the calling convention, and the set spans buffers: a
+    /// command that acts only on `all[primary]` and ignores the other fourteen
+    /// is a bug report, not a limitation.
+    cursors: option<cursor-set>,
+    /// From the keybinding or the palette, as the manifest declared them.
+    arguments: attributes,
+  }
+
+  /// Off-path. By the time this is entered the host has returned to the frame
+  /// loop and the palette has closed. The return value is an acknowledgement;
+  /// nothing the user is looking at is waiting for it.
+  run: async func(i: invocation) -> result<_, plugin-error>;
+}

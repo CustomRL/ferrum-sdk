@@ -1,0 +1,87 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "decorations".
+
+/// Publish visual annotations over a buffer.
+///
+/// The closest thing here to drawing, kept from becoming drawing by one rule:
+/// **a plugin names a theme role, never a colour.** No hex value, no RGB, no
+/// opacity, no geometry. A plugin decorating something red gets whatever the
+/// active theme calls `error`, so decorations stay legible in a theme the
+/// author never saw and a plugin cannot paint editor chrome onto the canvas to
+/// fake UI it was not granted.
+interface decorations {
+  use types.{buffer-id, span, viewport, attributes, staleness-class,
+             publication, credit, host-error};
+
+  /// Semantic roles from the active theme. A genuinely closed set, so it stays
+  /// an enum: themes are authored against these, and a theme that changes
+  /// `accent` moves every decoration that asked for it.
+  enum role { accent, warn, error, added, removed, modified, muted, subtle }
+
+  /// Presentation is a string kind plus a validated bag, because decoration
+  /// vocabulary is the fastest-churning surface in any editor plugin API and
+  /// the least able to survive a frozen variant.
+  ///
+  /// v1 kinds:
+  ///   "fill"         background fill over the span
+  ///   "underline"    squiggle shape is the host's choice, not the plugin's
+  ///   "strikethrough"
+  ///   "gutter"       a mark in the gutter on the span's first row
+  ///   "end-of-line"  virtual text after the last glyph; never shifts layout
+  ///   "inlay"        virtual text inline at the span start; **shifts layout**,
+  ///                  so the host applies these only at a frame boundary and
+  ///                  compensates the scroll anchor by the exact row delta in
+  ///                  the same frame — text under the cursor never jumps
+  ///                  because a plugin published a hint
+  ///   "overview"     a mark on the scrollbar overview ruler
+  ///
+  /// v1 `props` keys:
+  ///   "text"      (text)    inlay / end-of-line / gutter content
+  ///   "glyph"     (text)    "dot" | "chevron" | "plus" | "minus" | "bar" |
+  ///                         "warning"
+  ///   "tooltip"   (text)    plain text on hover; not markdown, not a link
+  ///   "priority"  (integer) order within this layer
+  ///   "pad-left"  (boolean)
+  ///   "pad-right" (boolean)
+  ///
+  /// An unknown kind or an unknown `ferrum.` key is `invalid`, echoed to the
+  /// plugin console with the offending value, and the item is dropped — the
+  /// whole batch is not.
+  record item {
+    at: span,
+    kind: string,
+    role: role,
+    props: attributes,
+  }
+
+  /// Handles to the layers this plugin's manifest declared. A layer is the
+  /// unit of ownership, ordering and eviction — a git plugin's gutter and its
+  /// blame text are two layers, replaced independently. Ids and cross-layer
+  /// priority come from the manifest.
+  all: func() -> list<layer>;
+  get: func(id: string) -> option<layer>;
+
+  resource layer {
+    id: func() -> string;
+    staleness: func() -> staleness-class;
+
+    /// See `diagnostics.sink.view`. Once per layer.
+    view: func() -> result<stream<viewport>, host-error>;
+    credit-updates: func() -> result<stream<credit>, host-error>;
+    available-credit: func() -> credit;
+
+    /// Replace this layer's items within `p.scope` for `p.at`. Non-blocking,
+    /// latest-wins per `(plugin, layer, buffer)`, same caps and credits as
+    /// `diagnostics.sink.publish`.
+    publish: func(p: publication, items: list<item>) -> result<_, host-error>;
+
+    clear: func(buffer: buffer-id) -> result<_, host-error>;
+    clear-all: func() -> result<_, host-error>;
+
+    /// Hide without discarding. A real frame-budget win — toggling inlay hints
+    /// off costs the host a flag rather than costing the plugin a republish —
+    /// and the reason a layer is a resource rather than a string parameter.
+    set-visible: func(visible: bool);
+  }
+}
