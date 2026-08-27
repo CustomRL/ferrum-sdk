@@ -10,6 +10,12 @@ package ferrum:plugin@1.0.0;
 /// group, and why consent shows it *paired*: "can read your open files **and**
 /// send data to api.example.com" is the actual risk. Either half alone is not.
 ///
+/// A request may be sent *as* the user, using a credential the manifest
+/// declared — see `request.credential`. The token stays host-side; the guest
+/// names it and never sees it. Consent for that reads "send data to
+/// api.example.com, signed in as you", which is a materially different
+/// sentence and is shown as one.
+///
 /// Never a WASI sockets import. No listening, no raw sockets, no websockets at
 /// v1 — a long-lived bidirectional channel is a different consent sentence and
 /// gets its own capability when it is actually needed.
@@ -33,6 +39,26 @@ interface net-fetch {
     /// show the user exactly what left. Response bodies carry no such risk, so
     /// they stream.
     body: option<list<u8>>,
+
+    /// A credential from the manifest to send this request as, if any.
+    ///
+    /// **The token never crosses this boundary.** The guest names a credential
+    /// the manifest declared; the host looks it up, attaches the header, and
+    /// sends. A plugin cannot read the secret, cannot log it, and cannot put
+    /// it on a request to anywhere else — the host attaches it only when the
+    /// resolved host matches the one the manifest paired it with, checked
+    /// after DNS and after any redirect.
+    ///
+    /// This exists because the alternative is what every other extension
+    /// ecosystem does: hand the plugin a token and hope. A capability that
+    /// reads a credential file is a credential-stealing primitive for every
+    /// plugin that asks for it, however honestly the first one behaves.
+    ///
+    /// Naming a credential the manifest did not declare is an error, not a
+    /// silent unauthenticated request — a request that quietly went out
+    /// without its authentication is one whose 401 an author debugs for an
+    /// hour.
+    credential: option<string>,
   }
 
   record response {

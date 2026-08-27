@@ -1,26 +1,36 @@
 package ferrum:plugin@1.0.0;
 
 // CAPABILITY. Grant name: "status-item".
+// Consent: "put an icon in the sidebar and show a reading when you click it".
 
-/// A small persistent reading in the window's chrome.
+/// A small persistent reading in the window's chrome, and what it says when
+/// somebody asks.
 ///
-/// **This is not a UI surface either, and the same rule applies.** The plugin
-/// supplies a label, an optional fraction and an optional line of detail. The
-/// host decides the slot, the size, the typeface, the colours and whether to
-/// show it at all. No geometry, no colour, no layout, no handle to anything
-/// drawn — a guest cannot place a pixel, cannot overlap the editor, and cannot
-/// make its item bigger than the host wants it.
+/// **This is not a UI surface and must not become one.** The plugin supplies a
+/// number and some label-and-value rows. The host decides where the icon sits,
+/// how big it is, what the sheet looks like when it opens, in what typeface and
+/// with what colours — and whether to show any of it at all. No geometry, no
+/// colour, no widget, no handle to anything drawn.
 ///
-/// It is deliberately *narrower* than the reserved `cap-panels`, and it is not
-/// a first instalment of it. `notify` is the seam for things that interrupt;
-/// this is the seam for a number somebody wants to be able to glance at. The
-/// vocabulary is fixed at what a glanceable reading needs — a name, a
-/// proportion, a word of context — because a vocabulary that grows one field
-/// at a time is how a constrained widget becomes an unconstrained one.
+/// The line to hold is between *content* and *layout*. A list of rows is
+/// content: the host is free to render it as a table, a definition list, or
+/// three lines of prose on a phone-sized window, and nothing in the guest
+/// notices. The moment a guest can say where a row goes, how wide it is, or
+/// what colour it is, this has become `cap-panels`, which is reserved and
+/// deliberately absent.
 ///
-/// The motivating case is a usage meter: how much of a quota is spent and when
-/// it resets. That is a label, a fraction and a line of detail, and everything
-/// beyond it is a panel.
+/// It is deliberately narrower than `cap-panels` and is not a first instalment
+/// of it. The vocabulary is fixed at what a glanceable reading needs — a
+/// proportion, a few facts, a line of context — because a vocabulary that grows
+/// one field at a time is how a constrained widget becomes an unconstrained one.
+///
+/// # The icon is not in this interface
+///
+/// A plugin's icon is declared in its manifest and shipped with the artifact,
+/// not set through a function here. That is on purpose: an icon is the thing a
+/// person clicks, so it is identity, and identity is reviewed at publish time
+/// along with everything else in the manifest. A runtime `set-icon` would let a
+/// plugin become something else after it was consented to.
 interface status-item {
   use types.{command-id, host-error};
 
@@ -31,11 +41,11 @@ interface status-item {
   /// changed, and a plugin naming *another plugin's* pixel is a fight the host
   /// would have to referee.
   enum slot {
-    /// The foot of the activity rail, under the last icon. Narrow: expect
-    /// room for a very short label and a bar, and nothing else.
-    rail-foot,
-    /// The trailing end of the status bar. Wider, and shared with the host's
-    /// own readings, so the host may abbreviate or drop it under pressure.
+    /// The activity rail, with the editor's own controls. Narrow: an icon,
+    /// and a small mark over it if there is something to say.
+    rail,
+    /// The trailing end of the status bar, shared with the host's own
+    /// readings, so the host may abbreviate or drop it under pressure.
     status-bar,
   }
 
@@ -48,40 +58,71 @@ interface status-item {
     error,
   }
 
-  /// What to show. Every field is advisory: the host truncates, abbreviates
-  /// and drops as its own layout requires.
+  /// The state of the icon itself.
+  ///
+  /// Everything here is advisory: the host truncates, abbreviates and drops as
+  /// its own layout requires, and a rail may have room for the icon and
+  /// nothing else.
   record reading {
-    /// What the reading is. Short — a slot may have room for a dozen
-    /// characters and will clip rather than grow.
+    /// What this is, for a tooltip and for the sheet's heading. Short.
     label: string,
 
-    /// A proportion in `[0, 1]`, drawn as a bar. `none` draws no bar, which is
-    /// the right answer for a reading that is not a proportion.
+    /// A proportion in `[0, 1]`, which the host may draw as a ring, a bar or
+    /// nothing at all. `none` is the right answer for a reading that is not a
+    /// proportion.
     ///
     /// Clamped by the host rather than rejected. A plugin that computes 1.02
-    /// from a quota that briefly overshoots should draw a full bar, not fail.
+    /// from a quota that briefly overshoots should draw as full, not fail.
     fraction: option<f32>,
 
-    /// One line under or beside the label, as the slot allows: "resets in 54
-    /// min", "3 of 8 failing". `none` shows the label alone.
-    detail: option<string>,
-
-    /// Shown on hover, where the host has hover. Free to be longer than
-    /// `detail` and free to be ignored.
-    tooltip: option<string>,
+    /// One line for a tooltip: "37% used, resets in 54 min".
+    summary: option<string>,
 
     tone: tone,
+  }
+
+  /// One fact in the sheet.
+  ///
+  /// Label and value, and nothing else. Not a cell, not a column, not a widget
+  /// — the host is free to lay a list of these out however its window wants.
+  record fact {
+    label: string,
+    value: string,
+  }
+
+  /// What opens when somebody clicks the icon.
+  ///
+  /// Content only. The host draws it as a popover, a sheet or a dialog as its
+  /// own design dictates, and a guest cannot tell which it chose.
+  record details {
+    /// The heading. Usually the plugin's own name.
+    title: string,
+
+    /// The headline proportion, drawn large. `none` shows the facts alone.
+    fraction: option<f32>,
+
+    /// The line under the heading: "resets in 54 min".
+    caption: option<string>,
+
+    /// The rows. The host shows as many as fit and may drop the rest, so put
+    /// the ones that matter first.
+    facts: list<fact>,
+
+    /// A quieter line at the bottom: where the number came from, when it was
+    /// last read. Worth using — a number with no provenance is a number
+    /// somebody has to trust blindly.
+    footnote: option<string>,
   }
 
   /// A live item, for as long as the handle is held.
   ///
   /// A resource because its lifetime *is* the handle's lifetime: dropping it
-  /// removes the item. A guest that traps, unwinds or is torn down cannot
-  /// leave a stale reading in the chrome claiming a quota that was last
-  /// measured an hour ago — which is worse than showing nothing, because a
-  /// number on screen is read as a current number.
+  /// removes the icon. A guest that traps, unwinds or is torn down cannot leave
+  /// a stale reading in the chrome claiming a quota that was last measured an
+  /// hour ago — which is worse than showing nothing, because a number on screen
+  /// is read as a current number.
   resource item {
-    /// Replace what the item shows.
+    /// Replace what the icon shows.
     ///
     /// Fire and forget: no result, so it cannot be awaited and cannot block a
     /// redraw. The host coalesces updates on its own schedule, and a plugin
@@ -89,13 +130,24 @@ interface status-item {
     /// tune itself into the frame loop.
     set: func(to: reading);
 
-    /// A manifest-declared command to run when the item is activated, or
-    /// `none` for a reading that is not clickable.
+    /// Replace what opens when the icon is clicked.
+    ///
+    /// Set ahead of the click rather than computed during it. A guest asked to
+    /// produce content *while* somebody is waiting for a popover is a guest
+    /// whose budget overrun is a visible stall; this way the host already has
+    /// something to draw and the click is never slower than a repaint.
+    ///
+    /// `none` makes the icon inert, which is the right state for a reading
+    /// that has nothing more to say.
+    describe: func(as-details: option<details>);
+
+    /// Run a manifest-declared command from the sheet instead of, or as well
+    /// as, showing it — "Sign in", "Refresh now".
     ///
     /// A `command-id` rather than a callback: the command is already declared,
     /// already namespaced by plugin identity and already visible in the
     /// palette, so a click grants nothing that was not granted at install.
-    on-activate: func(command: option<command-id>);
+    action: func(label: string, command: option<command-id>);
   }
 
   /// Claim a slot.
