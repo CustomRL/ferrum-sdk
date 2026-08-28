@@ -83,11 +83,24 @@ interface status-item {
 
   /// One fact in the sheet.
   ///
-  /// Label and value, and nothing else. Not a cell, not a column, not a widget
-  /// — the host is free to lay a list of these out however its window wants.
+  /// A label, a value, and optionally a proportion the host may draw as a bar.
+  /// Not a cell, not a column, not a widget — the host is free to lay a list of
+  /// these out however its window wants, and a host too narrow for bars simply
+  /// does not draw them.
+  ///
+  /// The proportion is here rather than only on `details` because the
+  /// motivating sheet has two meters in it, not one: a session window and a
+  /// weekly window, each with its own figure and its own reset. A sheet that
+  /// could show one bar would make the second fact a sentence, which is a
+  /// worse answer to the same question.
   record fact {
     label: string,
     value: string,
+    /// `[0, 1]`. `none` is a fact that is not a proportion, which most are.
+    ///
+    /// Clamped by the host rather than rejected, like every other fraction in
+    /// this interface.
+    fraction: option<f32>,
   }
 
   /// What opens when somebody clicks the icon.

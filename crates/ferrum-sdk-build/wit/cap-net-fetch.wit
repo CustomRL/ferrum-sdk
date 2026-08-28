@@ -26,10 +26,17 @@ interface net-fetch {
 
   record request {
     method: method,
-    /// Absolute `https://` URL. The host re-checks the resolved address
-    /// against the manifest allowlist *after* DNS, so a hostile DNS answer
-    /// cannot redirect an allowed name at an internal address, and does not
-    /// follow a redirect off the allowlist.
+    /// Absolute `https://` URL, whose host must be on the manifest's
+    /// `net-fetch` list. Checked as a name, before the connection is made.
+    ///
+    /// Redirects are not followed at all — not "not followed off the
+    /// allowlist". A 3xx comes back as the response it is, because a redirect
+    /// the host chased would land somewhere it never checked.
+    ///
+    /// **The name is checked, not the address.** A hostile DNS answer for an
+    /// allowed name still reaches wherever it points, including an address
+    /// inside your network. Closing that means comparing the resolved address
+    /// before the request goes out, which this host does not yet do.
     url: string,
     headers: list<tuple<string, string>>,
     /// Buffered, not streamed, and capped by the host.
@@ -46,8 +53,15 @@ interface net-fetch {
     /// the manifest declared; the host looks it up, attaches the header, and
     /// sends. A plugin cannot read the secret, cannot log it, and cannot put
     /// it on a request to anywhere else — the host attaches it only when the
-    /// resolved host matches the one the manifest paired it with, checked
-    /// after DNS and after any redirect.
+    /// URL's host matches the one the manifest paired it with, and strips the
+    /// secret back out of the response, so a server that echoes request
+    /// headers cannot hand it to the guest that way either.
+    ///
+    /// Two limits worth knowing. The match is on the name rather than on the
+    /// address it resolves to, as above. And this protects you from the
+    /// *plugin*, not from the service: the host on the other end receives the
+    /// secret on every request, so a credential paired with a host its own
+    /// author runs is a credential that author has been given.
     ///
     /// This exists because the alternative is what every other extension
     /// ecosystem does: hand the plugin a token and hope. A capability that
