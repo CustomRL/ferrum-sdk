@@ -97,6 +97,45 @@ interface usage-read {
     oldest-minutes-ago: u32,
   }
 
+  /// One of a tool's rate-limit windows.
+  ///
+  /// This is the real thing: the service's own figure, not a total derived from
+  /// what happened to be on disk. Claude Code publishes it for exactly this
+  /// purpose, and a reading that says "22%" from here means twenty-two per cent
+  /// of an actual limit.
+  record window {
+    /// How much of the window is used, `[0, 1]`.
+    used: f32,
+    /// Minutes until it resets.
+    ///
+    /// Minutes rather than the epoch second the tool publishes, because this
+    /// world has no wall clock and does not want one — see `cap-clock`. A
+    /// countdown is what a reading shows anyway.
+    resets-in-minutes: u32,
+  }
+
+  /// What a tool says about its own limits.
+  record limits {
+    /// The short window. Five hours, for Claude Code.
+    session: window,
+    /// The long one. Seven days, for Claude Code.
+    week: window,
+    /// Whether the tool is currently allowed to make requests.
+    ///
+    /// A window at 100% and a window that is actually blocked are different
+    /// states, and a reading that could not tell them apart would show a full
+    /// bar for both.
+    blocked: bool,
+  }
+
+  /// The tool's own rate-limit figures.
+  ///
+  /// Fails when the tool does not publish them. Not every tool does, and one
+  /// that does may not have written any yet — a fresh install has no session.
+  /// Distinct from `buckets`, which is always derivable from what was recorded
+  /// but is a count of tokens rather than a share of a limit.
+  quota: func(recorded-by: tool) -> result<limits, host-error>;
+
   /// Hourly buckets covering the last `hours`, most recent first.
   ///
   /// Hours with no recorded use are omitted rather than returned as zeroes: a
