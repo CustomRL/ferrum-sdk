@@ -1,0 +1,103 @@
+package ferrum:plugin@1.0.0;
+
+// CAPABILITY. Grant name: "usage-read".
+// Consent: "see how many tokens your AI coding tools have used".
+
+/// How much an AI coding tool on this machine has been used, in tokens.
+///
+/// The numbers exist already: tools like Claude Code record the token counts of
+/// every model call in their own session files, on disk, belonging to the user.
+/// A plugin that wanted to show "how much have I used today" could read those
+/// files directly if it had the authority to — and that is precisely what makes
+/// this interface worth having, because that authority is enormous and this one
+/// is not.
+///
+/// **The host reads, the plugin gets numbers.** A session file is a verbatim
+/// transcript: every prompt, every reply, every path, every project name. To
+/// draw one percentage a plugin would otherwise read all of it. So the host
+/// does the reading and hands across counts, and the transcript never crosses
+/// the ABI. The consent line can then honestly say "how many tokens", because
+/// that is the whole of what is on offer.
+///
+/// This is the same shape as `cap-net-fetch`'s credential: the sensitive thing
+/// stays host-side and the guest is given the one derived fact it needs.
+///
+/// # Ages, not timestamps
+///
+/// There is no wall clock in this world — see `cap-clock`, which says why: it
+/// is a fingerprinting and correlation surface for no benefit. Buckets are
+/// therefore labelled by how long ago they started, not by when they were.
+///
+/// That is not a workaround, it is the better shape for the question. "How much
+/// in the last five hours" is a rolling window, and a rolling window is
+/// naturally expressed in ages. A guest that knew the wall time could correlate
+/// this machine's activity with anything else it ever sees; a guest that knows
+/// "42,000 tokens between three and four hours ago" can draw exactly the same
+/// reading and nothing else.
+///
+/// # What this is not
+///
+/// It is not billing, not a quota, and not a subscription balance. It reports
+/// what was *recorded locally* by a tool on this machine. A host that had those
+/// other numbers would have got them from a service, and getting them from a
+/// service is `cap-net-fetch` with a credential — a different decision, made
+/// separately.
+interface usage-read {
+  use types.{host-error};
+
+  /// Which tool's records to read.
+  ///
+  /// A closed enum rather than a string, so a guest cannot name a path or a
+  /// process and have the host go looking. Adding a tool is a host change and
+  /// a new consent wording, which is the correct amount of friction for
+  /// "somewhere else on your disk the editor will now read".
+  enum tool {
+    claude-code,
+  }
+
+  /// One hour of recorded use.
+  ///
+  /// Hourly because it is the coarsest bucket that still answers every question
+  /// a reading asks — a five-hour window, a day, a week — and because a week of
+  /// them is 168 records rather than the twenty-five thousand model calls they
+  /// summarise. A guest wanting a total adds them up; a guest wanting a chart
+  /// has one bar each.
+  record bucket {
+    /// How many whole hours before now this bucket started. `0` is the hour in
+    /// progress, `1` the one before it.
+    ///
+    /// The hour in progress is partial, and a guest showing it as a completed
+    /// figure will draw a number that climbs all hour and then resets. That is
+    /// the guest's problem to present, not the host's to hide.
+    hours-ago: u32,
+
+    /// Tokens sent, excluding anything served from cache.
+    input-tokens: u64,
+    /// Tokens generated.
+    output-tokens: u64,
+    /// Tokens written into a prompt cache. Billed differently by every service
+    /// that offers it, which is why it is not folded into `input-tokens`.
+    cache-write-tokens: u64,
+    /// Tokens read back from a prompt cache. Usually the largest number here by
+    /// two orders of magnitude, and usually the cheapest.
+    cache-read-tokens: u64,
+    /// How many model calls this bucket summarises.
+    calls: u64,
+  }
+
+  /// Hourly buckets covering the last `hours`, most recent first.
+  ///
+  /// Hours with no recorded use are omitted rather than returned as zeroes: a
+  /// week of mostly-idle buckets is mostly padding, and a guest summing a list
+  /// gets the same answer either way.
+  ///
+  /// The host bounds `hours` and may return fewer buckets than asked for. It
+  /// reads files off a disk, and a guest asking for ten years of history should
+  /// get a refusal or a truncation rather than a frozen window.
+  ///
+  /// Fails when the tool is not installed, when its records cannot be read, and
+  /// when the host has no implementation wired up. All three are `host-error`
+  /// rather than an empty list, because "nothing recorded" and "could not look"
+  /// are different answers and a guest showing 0% for the second is lying.
+  buckets: func(recorded-by: tool, hours: u32) -> result<list<bucket>, host-error>;
+}

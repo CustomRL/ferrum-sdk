@@ -32,6 +32,7 @@ world cap-diagnostics    { import diagnostics;    }
 world cap-decorations    { import decorations;    }
 world cap-tooling        { import tooling;        }
 world cap-status-item    { import status-item;    }
+world cap-usage-read     { import usage-read;     }
 
 // Reserved, deliberately absent at v1. Adding a capability interface plus its
 // `cap-*` world later is additive: existing components do not import it, so
@@ -145,6 +146,7 @@ world ferrum-host {
   include cap-edits;
   include cap-tooling;
   include cap-status-item;
+  include cap-usage-read;
 }
 
 // ----------------------------------------------------------------------------
