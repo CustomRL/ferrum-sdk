@@ -83,6 +83,18 @@ interface usage-read {
     cache-read-tokens: u64,
     /// How many model calls this bucket summarises.
     calls: u64,
+
+    /// The age in minutes of the oldest call in this bucket.
+    ///
+    /// Hours are the right grain for a total and the wrong one for a
+    /// countdown. A session window runs five hours from its first call, so a
+    /// guest showing "resets in" needs that first call's age to the minute; an
+    /// hourly bucket alone rounds the answer to the nearest hour, which on a
+    /// five-hour window is a fifth of it.
+    ///
+    /// Still an age, for the reason the whole record is: it says how long ago,
+    /// never when.
+    oldest-minutes-ago: u32,
   }
 
   /// Hourly buckets covering the last `hours`, most recent first.
