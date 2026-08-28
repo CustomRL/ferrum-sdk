@@ -45,15 +45,25 @@ package ferrum:plugin@1.0.0;
 interface usage-read {
   use types.{host-error};
 
-  /// Which tool's records to read.
+  /// Which tool's records to read, by name.
   ///
-  /// A closed enum rather than a string, so a guest cannot name a path or a
-  /// process and have the host go looking. Adding a tool is a host change and
-  /// a new consent wording, which is the correct amount of friction for
-  /// "somewhere else on your disk the editor will now read".
-  enum tool {
-    claude-code,
-  }
+  /// A string rather than a closed enum, and the reason is the ecosystem rather
+  /// than this interface. An enum would mean that supporting a second AI tool
+  /// required editing this file — a versioned interface every published plugin
+  /// is compiled against — so every developer who wanted to read a tool the
+  /// host had not blessed would need the host's author to ship a release first.
+  /// That is a plugin system whose ceiling is however much time its maintainer
+  /// has, which is the failure this whole capability model exists to avoid.
+  ///
+  /// **A name is not a path.** The host maps a name it recognises onto a
+  /// location it chose; a name it does not recognise is `host-error`, not a
+  /// lookup. So a guest still cannot say where to read, which is the property
+  /// the enum was protecting — the enum was simply the wrong mechanism for it,
+  /// because it put the *list* in the ABI instead of in the host.
+  ///
+  /// Lowercase, dashes, matching the manifest's other identifiers.
+  /// `claude-code` is the one the host knows today.
+  type tool = string;
 
   /// One hour of recorded use.
   ///
@@ -126,6 +136,17 @@ interface usage-read {
     /// states, and a reading that could not tell them apart would show a full
     /// bar for both.
     blocked: bool,
+
+    /// How many minutes ago these figures were measured.
+    ///
+    /// The host does not generate them — it reads what the tool last wrote —
+    /// and a tool only writes while it is running. So a figure can be an hour
+    /// old on a machine where nothing is wrong, and a reading that showed it
+    /// without saying so would be presenting stale data as live.
+    ///
+    /// Zero means the host has just seen it change. A guest should show this
+    /// whenever it is more than a couple of minutes.
+    measured-minutes-ago: u32,
   }
 
   /// The tool's own rate-limit figures.

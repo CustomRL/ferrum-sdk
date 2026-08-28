@@ -21,11 +21,46 @@ declare is a compile error in your own crate**, at your desk, rather than an
 install failure on somebody else's machine. That is why you write your own world
 naming what you need, rather than importing one large surface.
 
-There are sixteen capabilities. Ambient ones — `session`, `log`, `clock` — come
-with `plugin-base`. The rest are asked for and consented to: reading buffers,
-reading the workspace, reading files under a path scope, network fetch to a
-named host list, storage, notifications, commands, edits, diagnostics,
-decorations, tool integration, a status reading, and the plugin's own config.
+There are seventeen capabilities. Ambient ones — `session`, `log`, `clock` —
+come with `plugin-base`. The rest are asked for and consented to: reading
+buffers, reading the workspace, reading files under a path scope, network fetch
+to a named host list, storage, notifications, commands, edits, diagnostics,
+decorations, tool integration, a status reading, the plugin's own config, and
+reading how much of an AI tool's rate limit has been spent.
+
+## Exports are optional too
+
+`plugin-base` exports `lifecycle`, and that is the only thing you must
+implement. Everything else a plugin can *provide* is its own world you opt into,
+for the same reason capabilities are: a world that declared an export you did
+not implement would refuse to instantiate.
+
+```
+world provides-commands         // handle commands you registered
+world provides-completion       // supply completions
+world provides-hover            // supply hover text
+world provides-code-actions     // supply code actions
+world provides-symbols          // supply document symbols
+world provides-buffer-events    // observe buffer changes
+world provides-workspace-events // observe workspace changes
+world provides-refresh          // recompute what you display, when asked
+```
+
+`provides-refresh` is worth singling out if you show anything derived from data
+that moves. Without it `activate` is the only call into your plugin that will
+ever happen, so whatever you displayed is frozen at editor start. Implement
+`refresher::refresh` and the host calls it periodically, and again the moment a
+user opens your reading:
+
+```rust
+impl exports::ferrum::plugin::refresher::Guest for Hello {
+    async fn refresh() { /* recompute and re-`set` your status item */ }
+}
+```
+
+The host chooses when. There is no timer in this world, deliberately — a plugin
+that could schedule its own work could spend the editor's time without anybody
+having granted it anything.
 
 ## Getting started
 
@@ -153,9 +188,21 @@ rules that `wasm-tools` and wasmtime's version-compatible linking follow,
 additive change to the world a flag day for every published plugin.
 
 Adding a capability is additive — existing components do not import it, so they
-are unaffected. Adding a *field to a record* is not: the Canonical ABI is
-structural, so every record, enum and variant in `types` is frozen for the life
-of major version 1.
+are unaffected. So is adding a provider export world, and adding a function to
+an interface: a component that does not import or export the new thing links
+exactly as it did.
+
+Adding a *field to a record* is not. The Canonical ABI is structural, so every
+record, enum and variant in `types` is frozen for the life of major version 1,
+and so is every record in an interface that has shipped.
+
+"Has shipped" is the operative phrase, and it is doing real work rather than
+softening the rule. `cap-usage-read` gained a `measured-minutes-ago` field on
+its `limits` record after this crate existed but before this crate was ever
+tagged or published — so the set of components that would have broken was
+empty. That window is now closed. It closes for good the moment a version of
+this crate is published, because from then on the components are somebody
+else's and the editor has no way to recompile them.
 
 ## Licence
 

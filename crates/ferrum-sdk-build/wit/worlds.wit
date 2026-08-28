@@ -119,6 +119,7 @@ world provides-completion       { export completion;         }
 world provides-hover            { export hover;              }
 world provides-code-actions     { export code-actions;       }
 world provides-symbols          { export symbols;            }
+world provides-refresh          { export refresher;          }
 
 // ----------------------------------------------------------------------------
 // The host's world.

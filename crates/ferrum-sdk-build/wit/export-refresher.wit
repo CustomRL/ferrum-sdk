@@ -1,0 +1,35 @@
+package ferrum:plugin@1.0.0;
+
+/// A plugin that can bring what it shows up to date.
+///
+/// Optional, and separate from `lifecycle` for the reason `worlds.wit` gives
+/// about every provider export: a world that made this mandatory would stop a
+/// component that does not implement it from instantiating at all. A plugin
+/// whose reading never goes stale — a command handler, a linter — implements
+/// nothing here and is unaffected by this file existing.
+///
+/// # Why the host needs to ask at all
+///
+/// `activate` used to be the only call into a guest anywhere in this world.
+/// Everything a plugin displayed was therefore computed once, when the editor
+/// started, and then never again. That is invisible while a reading is static
+/// and wrong the moment it is not: a status item showing a figure from an hour
+/// ago looks exactly like one showing a figure from now.
+///
+/// The host decides when. A guest cannot wake itself up — there is no timer in
+/// this world and deliberately so, because a plugin that could schedule its own
+/// work could spend the editor's frame budget without anybody granting it
+/// anything.
+interface refresher {
+  /// Recompute whatever this plugin shows.
+  ///
+  /// Called on the host's own schedule and possibly never. It should be cheap
+  /// and it should be safe to call when nothing has changed: the host does not
+  /// know what "changed" means for any particular plugin, so it does not try to
+  /// guess and instead asks.
+  ///
+  /// Returns nothing. A plugin that cannot recompute should keep showing what
+  /// it has rather than clearing itself — a blank reading and a stale one are
+  /// both wrong, and the stale one at least says when it was taken.
+  refresh: async func();
+}
