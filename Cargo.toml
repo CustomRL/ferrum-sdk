@@ -16,3 +16,9 @@ repository = "https://github.com/CustomRL/ferrum-sdk"
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
+
+[profile.dev]
+# Line tables, not full debug info. Ferrum's own target/ reached 220 GB with the
+# default, because every test binary keeps its own copy. A backtrace only needs
+# to symbolicate.
+debug = "line-tables-only"
